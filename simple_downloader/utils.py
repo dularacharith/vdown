@@ -29,8 +29,15 @@ def format_duration(seconds: Optional[float]) -> str:
     return f"{minutes:02d}:{remaining_secs:02d}"
 
 
+WINDOWS_RESERVED = {
+    "CON", "PRN", "AUX", "NUL",
+    "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8", "COM9",
+    "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+}
+
+
 def sanitize_filename(filename: str, max_length: int = 200) -> str:
-    """Sanitize filename to be safe on all operating systems."""
+    """Sanitize filename to be safe on all operating systems (Windows, Linux, macOS)."""
     if not filename:
         return "download"
     # Remove directory traversal and illegal characters
@@ -47,6 +54,10 @@ def sanitize_filename(filename: str, max_length: int = 200) -> str:
             cleaned = name_part[: max_length - len(ext_part) - 1] + "." + ext_part
         else:
             cleaned = cleaned[:max_length]
+    # Check Windows reserved names
+    base = cleaned.split(".")[0].upper()
+    if base in WINDOWS_RESERVED:
+        cleaned = f"_{cleaned}"
     return cleaned
 
 

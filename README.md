@@ -20,6 +20,10 @@ A fast, versatile command-line video and media downloader. Download videos, audi
 - **FFmpeg**: Required for audio/video merging and format conversion
 
 ```bash
+# Windows (via winget)
+winget install Python.Python.3.12
+winget install Gyan.FFmpeg
+
 # Arch Linux
 sudo pacman -S ffmpeg python
 
@@ -31,15 +35,21 @@ sudo apt install ffmpeg python3 python3-venv
 
 ## Installation
 
-Clone the repository and run the installer script:
-
+### Linux / macOS
 ```bash
 git clone git@github.com:dularacharith/vdown.git
 cd vdown
 ./install.sh
 ```
+This sets up a virtual environment and links `vdown` into `~/.local/bin/vdown`.
 
-The installer sets up a virtual environment and symlinks `vdown` to `~/.local/bin/vdown` so you can use it from anywhere in your terminal.
+### Windows (CMD or PowerShell)
+```cmd
+git clone git@github.com:dularacharith/vdown.git
+cd vdown
+install.bat
+```
+After running `install.bat`, you can run `.\vdown.bat` directly or add `.venv\Scripts` to your system PATH.
 
 ---
 
