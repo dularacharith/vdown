@@ -1,0 +1,477 @@
+"""Core engine orchestrating yt-dlp, webpage scraping, and direct HTTP downloading."""
+
+import os
+import sys
+from pathlib import Path
+from typing import Optional, Dict, Any, List, Tuple
+import yt_dlp
+from rich.console import Console
+from rich.progress import (
+    Progress,
+    SpinnerColumn,
+    BarColumn,
+    TextColumn,
+    DownloadColumn,
+    TransferSpeedColumn,
+    TimeRemainingColumn,
+)
+
+from simple_downloader.direct_downloader import DirectDownloader
+from simple_downloader.scraper import WebpageVideoScraper
+from simple_downloader.tiktok import TikTokDownloader, is_tiktok_url
+from simple_downloader.utils import (
+    is_direct_media_url,
+    format_bytes,
+    format_duration,
+    sanitize_filename,
+)
+
+console = Console()
+
+
+class DownloadEngine:
+    """Unified engine for media extraction and downloading across any platform or link."""
+
+    def __init__(self, console_instance: Optional[Console] = None):
+        self.console = console_instance or console
+
+    def get_media_info(
+        self,
+        url: str,
+        browser: Optional[str] = None,
+        cookie_file: Optional[str] = None,
+        proxy: Optional[str] = None,
+        user_agent: Optional[str] = None,
+        referer: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Extract metadata and formats for any given URL.
+
+        Falls back to webpage scraping and direct HTTP probing if yt-dlp does not support the URL.
+        """
+        # Specialized TikTok handler (watermark-free videos & photo posts)
+        if is_tiktok_url(url):
+            try:
+                tt = TikTokDownloader()
+                tt_info = tt.get_info(url)
+                if tt_info:
+                    return tt_info
+            except Exception:
+                pass
+
+        ydl_opts: Dict[str, Any] = {
+            "quiet": True,
+            "no_warnings": True,
+            "extract_flat": "in_playlist",
+            "skip_download": True,
+        }
+
+        if browser:
+            ydl_opts["cookiesfrombrowser"] = (browser,)
+        if cookie_file:
+            ydl_opts["cookiefile"] = cookie_file
+        if proxy:
+            ydl_opts["proxy"] = proxy
+        if user_agent or referer:
+            headers = {}
+            if user_agent:
+                headers["User-Agent"] = user_agent
+            if referer:
+                headers["Referer"] = referer
+            ydl_opts["http_headers"] = headers
+
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                if info:
+                    if "entries" in info and not info.get("formats"):
+                        info["is_playlist"] = True
+                    else:
+                        info["is_playlist"] = False
+                    return info
+        except Exception as e:
+            err_str = str(e).lower()
+            if any(k in err_str for k in ["login required", "bot", "confirm you're not a bot", "private video", "sign in", "401"]):
+                self.console.print("\n[bold yellow]⚠ Authentication or anti-bot verification required.[/bold yellow]")
+                self.console.print("[dim]Tip: Pass cookies from your browser, e.g. --browser chromium (or brave, chrome)[/dim]")
+
+        # 2. Try scraping embedded videos from arbitrary webpage
+        try:
+            scraper = WebpageVideoScraper(headers={"User-Agent": user_agent} if user_agent else None)
+            candidates = scraper.find_videos(url)
+            if candidates:
+                for candidate in candidates:
+                    cand_url = candidate["url"]
+                    try:
+                        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                            cand_info = ydl.extract_info(cand_url, download=False)
+                            if cand_info:
+                                cand_info["is_scraped"] = True
+                                cand_info["scraped_source"] = candidate["source"]
+                                return cand_info
+                    except Exception:
+                        continue
+
+                # If yt-dlp didn't parse candidate, return first candidate as direct stream
+                first_cand = candidates[0]
+                return {
+                    "id": "embedded_media",
+                    "title": f"Embedded Video ({first_cand['source']})",
+                    "url": first_cand["url"],
+                    "is_direct": True,
+                    "is_playlist": False,
+                    "formats": [],
+                }
+        except Exception:
+            pass
+
+        # 3. Fallback inspection for direct HTTP/HTTPS media files
+        try:
+            import requests
+
+            req_headers = {"User-Agent": user_agent or "Mozilla/5.0"}
+            if referer:
+                req_headers["Referer"] = referer
+
+            head = requests.head(
+                url,
+                allow_redirects=True,
+                timeout=15,
+                headers=req_headers,
+            )
+            size = int(head.headers.get("content-length", 0)) or None
+            content_type = head.headers.get("content-type", "application/octet-stream")
+            from simple_downloader.utils import get_filename_from_headers_or_url
+
+            filename = get_filename_from_headers_or_url(url, head.headers)
+
+            return {
+                "id": "direct_stream",
+                "title": filename,
+                "url": url,
+                "filesize": size,
+                "content_type": content_type,
+                "is_direct": True,
+                "is_playlist": False,
+                "formats": [],
+            }
+        except Exception as e:
+            raise RuntimeError(f"Could not extract info from URL: {e}")
+
+    def list_formats(self, info: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Parse formats list into clean, deduplicated video and audio options."""
+        formats = info.get("formats") or []
+        parsed = []
+        for f in formats:
+            vcodec = f.get("vcodec", "none")
+            acodec = f.get("acodec", "none")
+            is_video = vcodec != "none"
+            is_audio = acodec != "none"
+            height = f.get("height")
+            filesize = f.get("filesize") or f.get("filesize_approx")
+
+            note = f.get("format_note", "")
+            ext = f.get("ext", "")
+            fid = f.get("format_id", "")
+            tbr = f.get("tbr")
+            fps = f.get("fps")
+
+            parsed.append(
+                {
+                    "format_id": fid,
+                    "ext": ext,
+                    "resolution": f"{f.get('width', '?')}x{height}" if height else note or "audio only",
+                    "height": height or 0,
+                    "is_video": is_video,
+                    "is_audio": is_audio,
+                    "fps": fps,
+                    "vcodec": vcodec if is_video else None,
+                    "acodec": acodec if is_audio else None,
+                    "filesize": filesize,
+                    "tbr": tbr,
+                    "format_str": f.get("format", ""),
+                }
+            )
+        return parsed
+
+    def download(
+        self,
+        url: str,
+        output_path: Optional[str] = None,
+        output_dir: Optional[str] = None,
+        quality: Optional[str] = "best",
+        format_id: Optional[str] = None,
+        audio_only: bool = False,
+        audio_format: str = "mp3",
+        video_format: Optional[str] = None,
+        rate_limit: Optional[int] = None,
+        subtitles: bool = False,
+        sub_lang: str = "en",
+        embed_subs: bool = False,
+        embed_thumbnail: bool = False,
+        embed_metadata: bool = False,
+        playlist: bool = False,
+        playlist_items: Optional[str] = None,
+        browser: Optional[str] = None,
+        cookie_file: Optional[str] = None,
+        proxy: Optional[str] = None,
+        user_agent: Optional[str] = None,
+        referer: Optional[str] = None,
+        show_progress: bool = True,
+    ) -> Optional[str]:
+        """Execute the download using the most appropriate engine."""
+        # 1. Inspect URL info
+        info = None
+        try:
+            info = self.get_media_info(
+                url,
+                browser=browser,
+                cookie_file=cookie_file,
+                proxy=proxy,
+                user_agent=user_agent,
+                referer=referer,
+            )
+        except Exception:
+            pass
+
+        # Specialized TikTok handler (watermark-free videos & photo posts)
+        if info and info.get("is_tiktok"):
+            try:
+                tt = TikTokDownloader()
+                return tt.download(
+                    info=info,
+                    output_path=output_path,
+                    output_dir=output_dir,
+                    audio_only=audio_only,
+                    audio_format=audio_format,
+                    rate_limit=rate_limit,
+                    show_progress=show_progress,
+                )
+            except Exception as e:
+                self.console.print(f"[yellow]TikTok watermark-free download failed: {e}. Trying fallback...[/yellow]")
+
+        # If info indicated direct stream or scraper extracted an embedded stream URL
+        if info and info.get("is_direct"):
+            target_download_url = info.get("url") or url
+            downloader = DirectDownloader(rate_limit=rate_limit)
+            return downloader.download(
+                url=target_download_url,
+                output_path=output_path,
+                output_dir=output_dir,
+                show_progress=show_progress,
+            )
+
+        # 2. Build yt-dlp options
+        dest_dir = Path(output_dir or ".").expanduser().resolve()
+        dest_dir.mkdir(parents=True, exist_ok=True)
+
+        if output_path:
+            p = Path(output_path)
+            if audio_only and p.suffix.lower().lstrip(".") == audio_format.lower():
+                out_template = str(dest_dir / p.stem)
+            elif video_format and p.suffix.lower().lstrip(".") == video_format.lower():
+                out_template = str(dest_dir / p.stem)
+            else:
+                out_template = str(dest_dir / p.name)
+        else:
+            out_template = str(dest_dir / "%(title).200B [%(id)s].%(ext)s")
+
+        ydl_opts: Dict[str, Any] = {
+            "outtmpl": out_template,
+            "quiet": True,
+            "noprogress": True,
+            "no_warnings": True,
+            "noplaylist": not playlist,
+        }
+
+        # Browser cookies and proxies
+        if browser:
+            ydl_opts["cookiesfrombrowser"] = (browser,)
+        if cookie_file:
+            ydl_opts["cookiefile"] = cookie_file
+        if proxy:
+            ydl_opts["proxy"] = proxy
+
+        if user_agent or referer:
+            headers = {}
+            if user_agent:
+                headers["User-Agent"] = user_agent
+            if referer:
+                headers["Referer"] = referer
+            ydl_opts["http_headers"] = headers
+
+        if playlist_items:
+            ydl_opts["playlist_items"] = playlist_items
+
+        if rate_limit:
+            ydl_opts["ratelimit"] = rate_limit
+
+        # Format / Quality selection string
+        if format_id:
+            ydl_opts["format"] = format_id
+        elif audio_only:
+            ydl_opts["format"] = "bestaudio/best"
+            ydl_opts["postprocessors"] = [
+                {
+                    "key": "FFmpegExtractAudio",
+                    "preferredcodec": audio_format,
+                    "preferredquality": "192",
+                }
+            ]
+        else:
+            # Video quality logic
+            quality_map = {
+                "4k": "bestvideo[height<=2160]+bestaudio/best[height<=2160]/best",
+                "2160p": "bestvideo[height<=2160]+bestaudio/best[height<=2160]/best",
+                "1440p": "bestvideo[height<=1440]+bestaudio/best[height<=1440]/best",
+                "1080p": "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
+                "720p": "bestvideo[height<=720]+bestaudio/best[height<=720]/best",
+                "480p": "bestvideo[height<=480]+bestaudio/best[height<=480]/best",
+                "360p": "bestvideo[height<=360]+bestaudio/best[height<=360]/best",
+                "worst": "worstvideo+worstaudio/worst",
+                "best": "bestvideo+bestaudio/best",
+            }
+            ydl_opts["format"] = quality_map.get(
+                (quality or "best").lower(),
+                "bestvideo+bestaudio/best"
+            )
+
+        # Merge container
+        if video_format and not audio_only:
+            ydl_opts["merge_output_format"] = video_format
+        elif not audio_only:
+            ydl_opts["merge_output_format"] = "mp4"
+
+        # Subtitles
+        if subtitles or embed_subs:
+            ydl_opts["writesubtitles"] = True
+            ydl_opts["subtitleslangs"] = [sub_lang]
+            if embed_subs:
+                if "postprocessors" not in ydl_opts:
+                    ydl_opts["postprocessors"] = []
+                ydl_opts["postprocessors"].append(
+                    {"key": "FFmpegEmbedSubtitle"}
+                )
+
+        # Thumbnail embedding
+        if embed_thumbnail:
+            ydl_opts["writethumbnail"] = True
+            if "postprocessors" not in ydl_opts:
+                ydl_opts["postprocessors"] = []
+            ydl_opts["postprocessors"].append({"key": "EmbedThumbnail"})
+
+        # Metadata embedding
+        if embed_metadata:
+            if "postprocessors" not in ydl_opts:
+                ydl_opts["postprocessors"] = []
+            ydl_opts["postprocessors"].append({"key": "FFmpegMetadata"})
+
+        # Rich progress bar setup
+        last_file_downloaded = None
+
+        if show_progress:
+            from simple_downloader.progress import create_download_progress
+
+            progress = create_download_progress(show_progress=True)
+            task_tracker: Dict[str, Any] = {}
+
+            def ydl_progress_hook(d: Dict[str, Any]):
+                nonlocal last_file_downloaded
+                status = d.get("status")
+
+                if status == "downloading":
+                    filename = Path(d.get("filename", "Media")).name
+                    total = d.get("total_bytes") or d.get("total_bytes_estimate")
+                    downloaded = d.get("downloaded_bytes", 0)
+                    speed = d.get("speed")
+                    eta = d.get("eta")
+
+                    if "task_id" not in task_tracker:
+                        task_tracker["task_id"] = progress.add_task(
+                            f"{filename}",
+                            total=total,
+                            completed=downloaded,
+                            speed=speed,
+                            eta=eta,
+                        )
+                    else:
+                        progress.update(
+                            task_tracker["task_id"],
+                            description=f"{filename}",
+                            total=total,
+                            completed=downloaded,
+                            speed=speed,
+                            eta=eta,
+                        )
+
+                elif status == "finished":
+                    last_file_downloaded = d.get("filename")
+                    if "task_id" in task_tracker:
+                        progress.update(
+                            task_tracker["task_id"],
+                            description="Processing / Merging...",
+                        )
+
+            def ydl_postprocessor_hook(d: Dict[str, Any]):
+                nonlocal last_file_downloaded
+                if d.get("status") == "finished":
+                    filepath = d.get("filepath") or d.get("info_dict", {}).get("filepath")
+                    if filepath:
+                        last_file_downloaded = filepath
+
+            ydl_opts["progress_hooks"] = [ydl_progress_hook]
+            ydl_opts["postprocessor_hooks"] = [ydl_postprocessor_hook]
+
+            try:
+                with progress:
+                    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                        ret_code = ydl.download([url])
+                        if ret_code != 0:
+                            raise RuntimeError(f"Download failed with exit code {ret_code}")
+                return last_file_downloaded
+
+            except Exception as e:
+                err_str = str(e).lower()
+                if any(k in err_str for k in ["login required", "bot", "confirm you're not a bot", "private video", "sign in", "401"]):
+                    self.console.print("\n[bold yellow]⚠ This platform requires authentication or session cookies.[/bold yellow]")
+                    self.console.print("[dim]Tip: Retry with your browser session, e.g.:[/dim]")
+                    self.console.print("  [cyan]vdown \"<link>\" --browser chromium[/cyan]")
+                    self.console.print("  [cyan]vdown \"<link>\" --browser brave[/cyan]")
+                    self.console.print("  [cyan]vdown \"<link>\" --browser chrome[/cyan]\n")
+
+                # Fallback: Try webpage video scraper
+                scraper = WebpageVideoScraper(headers={"User-Agent": user_agent} if user_agent else None)
+                candidates = scraper.find_videos(url)
+                if candidates:
+                    self.console.print(f"[yellow]Searching embedded videos on page... found {len(candidates)} candidates.[/yellow]")
+                    for cand in candidates:
+                        try:
+                            return self.download(
+                                url=cand["url"],
+                                output_path=output_path,
+                                output_dir=output_dir,
+                                quality=quality,
+                                format_id=format_id,
+                                audio_only=audio_only,
+                                audio_format=audio_format,
+                                video_format=video_format,
+                                rate_limit=rate_limit,
+                                show_progress=show_progress,
+                            )
+                        except Exception:
+                            continue
+
+                # Fallback: Direct HTTP downloader
+                if is_direct_media_url(url) or "http" in url:
+                    self.console.print("[yellow]Trying direct HTTP streaming downloader...[/yellow]")
+                    downloader = DirectDownloader(rate_limit=rate_limit)
+                    return downloader.download(
+                        url=url,
+                        output_path=output_path,
+                        output_dir=output_dir,
+                        show_progress=show_progress,
+                    )
+                raise e
+        else:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
+            return last_file_downloaded
