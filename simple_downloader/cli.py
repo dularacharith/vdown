@@ -246,18 +246,29 @@ def _run_interactive_mode_impl(engine: DownloadEngine, initial_url: Optional[str
     display_media_info(info, console)
 
     # Detect playlist presence in link
+    is_sp = info.get("is_spotify", False)
     is_playlist = info.get("is_playlist", False) or ("list=" in url.lower())
     playlist = False
     playlist_items = None
 
     if is_playlist:
         entry_count = info.get("playlist_count") or len(info.get("entries") or [])
-        count_str = f" ({entry_count} videos)" if entry_count else ""
-        console.print(f"\n[bold yellow]📂 YouTube Playlist Detected{count_str}[/bold yellow]")
+        item_word = "tracks" if is_sp else "videos"
+        count_str = f" ({entry_count} {item_word})" if entry_count else ""
+        platform_name = "Spotify" if is_sp else "YouTube"
+        console.print(f"\n[bold yellow]📂 {platform_name} Playlist Detected{count_str}[/bold yellow]")
         console.print("  [1] 📥 Download Entire Playlist [Default]")
         console.print("  [2] 🔢 Download Specific Range / Items (e.g. 1-10, 1,3,5)")
-        console.print("  [3] 🎬 Download Single Video Only")
-        pl_choice = Prompt.ask("Playlist Selection", choices=["1", "2", "3"], default="1")
+        if not is_sp:
+            console.print("  [3] 🎬 Download Single Video Only")
+            pl_choice = Prompt.ask("Playlist Selection", choices=["1", "2", "3"], default="1")
+        else:
+            console.print("  [3] ❌ Exit")
+            pl_choice = Prompt.ask("Playlist Selection", choices=["1", "2", "3"], default="1")
+            if pl_choice == "3":
+                console.print("\n[bold yellow]👋 Goodbye![/bold yellow]")
+                return 0
+
         if pl_choice == "1":
             playlist = True
         elif pl_choice == "2":
@@ -269,19 +280,22 @@ def _run_interactive_mode_impl(engine: DownloadEngine, initial_url: Optional[str
         elif pl_choice == "3":
             playlist = False
 
-    console.print("\n[bold yellow]What would you like to do?[/bold yellow]")
-    console.print("  [1] 🌟 Best Quality Video (Video + Audio)")
-    console.print("  [2] 🎯 Choose Specific Resolution / Quality")
-    console.print("  [3] 🎵 Audio Only (MP3, FLAC Lossless, M4A, WAV, etc.)")
-    if not is_playlist:
-        console.print("  [4] 📋 List All Available Formats")
-        console.print("  [5] ❌ Exit")
-        choice = Prompt.ask("Select option", choices=["1", "2", "3", "4", "5"], default="1")
+    if is_sp:
+        choice = "3"
     else:
-        console.print("  [4] ❌ Exit")
-        choice = Prompt.ask("Select option", choices=["1", "2", "3", "4"], default="1")
-        if choice == "4":
-            choice = "5"
+        console.print("\n[bold yellow]What would you like to do?[/bold yellow]")
+        console.print("  [1] 🌟 Best Quality Video (Video + Audio)")
+        console.print("  [2] 🎯 Choose Specific Resolution / Quality")
+        console.print("  [3] 🎵 Audio Only (MP3, FLAC Lossless, M4A, WAV, etc.)")
+        if not is_playlist:
+            console.print("  [4] 📋 List All Available Formats")
+            console.print("  [5] ❌ Exit")
+            choice = Prompt.ask("Select option", choices=["1", "2", "3", "4", "5"], default="1")
+        else:
+            console.print("  [4] ❌ Exit")
+            choice = Prompt.ask("Select option", choices=["1", "2", "3", "4"], default="1")
+            if choice == "4":
+                choice = "5"
 
     if choice == "5":
         console.print("\n[bold yellow]👋 Goodbye![/bold yellow]")
@@ -592,8 +606,18 @@ def main(argv: Optional[List[str]] = None) -> int:
         # Single URL download mode
         rate_limit_val = parse_speed_limit(args.rate_limit)
 
-        is_pure_playlist = bool(args.url and ("playlist?list=" in args.url.lower()))
+        from simple_downloader.spotify import is_spotify_url, parse_spotify_url
+
+        is_spotify = is_spotify_url(args.url) if args.url else False
+        is_sp_playlist = False
+        if is_spotify:
+            parsed_sp = parse_spotify_url(args.url)
+            if parsed_sp and parsed_sp[0] in ("playlist", "album"):
+                is_sp_playlist = True
+
+        is_pure_playlist = bool(args.url and ("playlist?list=" in args.url.lower())) or is_sp_playlist
         playlist = (args.playlist or is_pure_playlist or bool(args.playlist_items)) and not args.no_playlist
+        audio_only = args.audio_only or is_spotify
 
         return do_download(
             engine=engine,
@@ -602,7 +626,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             output_dir=args.output_dir,
             quality=args.quality,
             format_id=args.format_id,
-            audio_only=args.audio_only,
+            audio_only=audio_only,
             audio_format=args.audio_format,
             audio_quality=args.audio_quality,
             video_format=args.video_format,

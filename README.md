@@ -4,7 +4,8 @@ A fast, versatile command-line video and media downloader. Download videos, audi
 
 ## Features
 
-- **Universal Link Support**: Downloads from YouTube, Facebook, Instagram, TikTok (without watermark), Twitter/X, Vimeo, Reddit, Twitch, and 1800+ other platforms.
+- **Universal Link Support**: Downloads from YouTube, Facebook, Instagram, TikTok (without watermark), Spotify, Twitter/X, Vimeo, Reddit, Twitch, and 1800+ other platforms.
+- **Spotify Tracks & Playlists**: Download Spotify tracks, playlists, and albums in **FLAC Lossless**, **WAV PCM**, or **320 kbps MP3** with embedded tags and high-resolution album cover art.
 - **YouTube Playlists**: Downloads complete playlists or specific track ranges into organized folders with track numbers (`01 - Title.mp4`).
 - **Studio-Quality Audio Extraction**: Extract audio in lossless **FLAC** (bit-perfect studio quality), **320 kbps MP3** (extreme high quality), **M4A/AAC**, **WAV** (lossless uncompressed PCM), and **OPUS**.
 - **Interactive Audio Menu**: Select formats and bitrates (320k, 256k, 192k, 128k, VBR, custom) directly from a guided wizard.
@@ -92,12 +93,30 @@ vdown "https://www.youtube.com/playlist?list=PL..." -a --audio-format flac
 vdown "https://www.youtube.com/watch?v=..." -a -aq 256
 ```
 
-### 4. Choose Video Resolution (e.g. 4K, 1080p, or 720p)
+### 4. Spotify Tracks, Playlists & Albums (FLAC, WAV, 320k MP3)
+```bash
+# Download Spotify track as high quality 320 kbps MP3 (default)
+vdown "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT"
+
+# Download Spotify track as bit-perfect lossless FLAC with embedded 640x640 album art
+vdown "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT" --audio-format flac
+
+# Download Spotify track as uncompressed lossless WAV
+vdown "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT" --audio-format wav
+
+# Download full Spotify playlist / album into organized directory with track numbers
+vdown "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M"
+
+# Download specific items from Spotify playlist as lossless FLAC
+vdown "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M" --playlist-items 1-5 --audio-format flac
+```
+
+### 5. Choose Video Resolution (e.g. 4K, 1080p, or 720p)
 ```bash
 vdown "https://www.youtube.com/watch?v=..." -q 1080p
 ```
 
-### 5. TikTok (No Watermark & Photo Slideshows)
+### 6. TikTok (No Watermark & Photo Slideshows)
 ```bash
 vdown "https://vt.tiktok.com/ZSqF9Tr6a/"
 
@@ -105,23 +124,23 @@ vdown "https://vt.tiktok.com/ZSqF9Tr6a/"
 vdown "https://vt.tiktok.com/ZSqF9Tr6a/" -a --audio-format flac
 ```
 
-### 6. Instagram & Facebook (With Browser Session)
+### 7. Instagram & Facebook (With Browser Session)
 ```bash
 vdown "https://www.instagram.com/reel/.../" --browser chromium
 vdown "https://www.facebook.com/reel/..." --browser chromium
 ```
 
-### 7. Inspect Link Details & Available Formats
+### 8. Inspect Link Details & Available Formats
 ```bash
 vdown "https://..." --info
 ```
 
-### 8. Custom Output Directory & File Name
+### 9. Custom Output Directory & File Name
 ```bash
 vdown "https://..." -o "video.mp4" -d ~/Downloads
 ```
 
-### 9. Batch Download
+### 10. Batch Download
 ```bash
 vdown -b links.txt -d ~/Downloads
 ```

@@ -528,5 +528,251 @@ class TestPlaylistAndAudioEngine(unittest.TestCase):
         display_media_info(playlist_info, test_console)
 
 
+class TestSpotifyDownloader(unittest.TestCase):
+    """Test Spotify URL detection, metadata extraction, search matching, and transcoding."""
+
+    def test_is_spotify_url_and_parsing(self):
+        from simple_downloader.spotify import is_spotify_url, parse_spotify_url
+
+        self.assertTrue(is_spotify_url("https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT"))
+        self.assertTrue(is_spotify_url("https://open.spotify.com/intl-es/track/4cOdK2wGLETKBW3PvgPWqT?si=123"))
+        self.assertTrue(is_spotify_url("https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M"))
+        self.assertTrue(is_spotify_url("https://open.spotify.com/album/1DFixLWuPkv3KT3TnV35m3"))
+        self.assertTrue(is_spotify_url("spotify:track:4cOdK2wGLETKBW3PvgPWqT"))
+        self.assertTrue(is_spotify_url("spotify:playlist:37i9dQZF1DXcBWIGoYBM5M"))
+        self.assertFalse(is_spotify_url("https://www.youtube.com/watch?v=12345"))
+        self.assertFalse(is_spotify_url("https://example.com/audio.mp3"))
+
+        self.assertEqual(parse_spotify_url("https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT"), ("track", "4cOdK2wGLETKBW3PvgPWqT"))
+        self.assertEqual(parse_spotify_url("https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M"), ("playlist", "37i9dQZF1DXcBWIGoYBM5M"))
+        self.assertEqual(parse_spotify_url("https://open.spotify.com/album/1DFixLWuPkv3KT3TnV35m3"), ("album", "1DFixLWuPkv3KT3TnV35m3"))
+
+    def test_spotify_track_get_info_mock(self):
+        from unittest.mock import patch, Mock
+        from simple_downloader.spotify import SpotifyDownloader
+
+        mock_html = '''
+        <html><head>
+        <script id="__NEXT_DATA__" type="application/json">
+        {
+            "props": {
+                "pageProps": {
+                    "state": {
+                        "data": {
+                            "entity": {
+                                "type": "track",
+                                "name": "Never Gonna Give You Up",
+                                "title": "Never Gonna Give You Up",
+                                "artists": [{"name": "Rick Astley"}],
+                                "duration": 213573,
+                                "releaseDate": {"isoString": "1987-11-12T00:00:00Z"},
+                                "visualIdentity": {
+                                    "image": [{"url": "https://example.com/cover640.jpg", "maxHeight": 640, "maxWidth": 640}]
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        </script></head><body></body></html>
+        '''
+        mock_resp = Mock()
+        mock_resp.status_code = 200
+        mock_resp.text = mock_html
+
+        sd = SpotifyDownloader()
+        with patch("requests.get", return_value=mock_resp):
+            info = sd.get_info("https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT")
+
+        self.assertIsNotNone(info)
+        self.assertTrue(info["is_spotify"])
+        self.assertFalse(info["is_playlist"])
+        self.assertEqual(info["track_title"], "Never Gonna Give You Up")
+        self.assertEqual(info["artist"], "Rick Astley")
+        self.assertEqual(info["duration"], 213)
+        self.assertEqual(info["upload_date"], "1987-11-12")
+        self.assertEqual(info["thumbnail"], "https://example.com/cover640.jpg")
+
+    def test_spotify_playlist_get_info_mock(self):
+        from unittest.mock import patch, Mock
+        from simple_downloader.spotify import SpotifyDownloader
+
+        mock_html = '''
+        <html><head>
+        <script id="__NEXT_DATA__" type="application/json">
+        {
+            "props": {
+                "pageProps": {
+                    "state": {
+                        "data": {
+                            "entity": {
+                                "type": "playlist",
+                                "title": "Top Hits 2026",
+                                "subtitle": "Spotify Curator",
+                                "trackList": [
+                                    {"title": "Track One", "subtitle": "Artist A", "duration": 180000, "uri": "spotify:track:111"},
+                                    {"title": "Track Two", "subtitle": "Artist B", "duration": 200000, "uri": "spotify:track:222"}
+                                ],
+                                "visualIdentity": {
+                                    "image": [{"url": "https://example.com/pl_cover.jpg", "maxHeight": 300}]
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        </script></head><body></body></html>
+        '''
+        mock_resp = Mock()
+        mock_resp.status_code = 200
+        mock_resp.text = mock_html
+
+        sd = SpotifyDownloader()
+        with patch("requests.get", return_value=mock_resp):
+            info = sd.get_info("https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M")
+
+        self.assertIsNotNone(info)
+        self.assertTrue(info["is_spotify"])
+        self.assertTrue(info["is_playlist"])
+        self.assertEqual(info["title"], "Top Hits 2026")
+        self.assertEqual(info["uploader"], "Spotify Curator")
+        self.assertEqual(info["playlist_count"], 2)
+        self.assertEqual(len(info["entries"]), 2)
+        self.assertEqual(info["entries"][0]["track_title"], "Track One")
+        self.assertEqual(info["entries"][0]["artist"], "Artist A")
+
+    def test_spotify_search_best_audio_match(self):
+        from unittest.mock import patch, MagicMock
+        from simple_downloader.spotify import SpotifyDownloader
+        import yt_dlp
+
+        sd = SpotifyDownloader()
+        mock_entries = [
+            {"id": "wrong1", "title": "Artist - Song Live at Stadium", "duration": 280, "uploader": "FanChannel"},
+            {"id": "correct_match", "title": "Artist - Song (Official Audio)", "duration": 215, "uploader": "Artist - Topic"},
+            {"id": "wrong2", "title": "Artist - Song (Acoustic Cover)", "duration": 215, "uploader": "Cover Singer"},
+        ]
+
+        def mock_extract(query, download=False):
+            return {"entries": mock_entries}
+
+        mock_ydl = MagicMock()
+        mock_ydl.__enter__.return_value = mock_ydl
+        mock_ydl.extract_info.side_effect = mock_extract
+
+        with patch.object(yt_dlp, "YoutubeDL", return_value=mock_ydl):
+            best = sd.search_best_audio_match("Artist", "Song", expected_duration=214)
+
+        self.assertIsNotNone(best)
+        self.assertEqual(best["id"], "correct_match")
+
+    def test_spotify_engine_routing(self):
+        from unittest.mock import patch
+        from simple_downloader.engine import DownloadEngine
+
+        engine = DownloadEngine()
+        with patch("simple_downloader.engine.SpotifyDownloader") as mock_sd_cls:
+            mock_sd_inst = mock_sd_cls.return_value
+            mock_sd_inst.get_info.return_value = {
+                "id": "123", "title": "Artist - Song", "is_spotify": True, "is_playlist": False,
+            }
+            mock_sd_inst.download_track.return_value = "/downloads/Song.flac"
+
+            res = engine.download(
+                "https://open.spotify.com/track/123",
+                audio_format="flac",
+                show_progress=False,
+            )
+            self.assertEqual(res, "/downloads/Song.flac")
+            mock_sd_inst.download_track.assert_called_once()
+
+    def test_spotify_download_track_calls_ffmpeg_flac(self):
+        from unittest.mock import patch, MagicMock
+        from simple_downloader.spotify import SpotifyDownloader
+        import tempfile
+        import glob
+
+        sd = SpotifyDownloader()
+        track_info = {
+            "id": "123",
+            "title": "Artist - Hit Song",
+            "track_title": "Hit Song",
+            "artist": "Artist",
+            "album": "Hit Album",
+            "duration": 210,
+            "thumbnail": None,
+            "upload_date": "2026-01-01",
+        }
+
+        with tempfile.TemporaryDirectory() as td:
+            with patch.object(sd, "search_best_audio_match", return_value={"id": "match123"}):
+                with patch("yt_dlp.YoutubeDL") as mock_ydl_cls:
+                    def mock_download(urls):
+                        temps = glob.glob(tempfile.gettempdir() + "/vdown_spotify_*")
+                        if temps:
+                            with open(os.path.join(temps[-1], "audio.webm"), "wb") as f:
+                                f.write(b"dummy audio")
+                        return 0
+
+                    mock_inst = MagicMock()
+                    mock_inst.__enter__.return_value = mock_inst
+                    mock_inst.download.side_effect = mock_download
+                    mock_ydl_cls.return_value = mock_inst
+
+                    captured_cmd = []
+                    def mock_subp_run(cmd, *args, **kwargs):
+                        nonlocal captured_cmd
+                        captured_cmd = cmd
+                        target_file = cmd[-1]
+                        with open(target_file, "wb") as f:
+                            f.write(b"dummy flac")
+                        m = MagicMock()
+                        m.returncode = 0
+                        return m
+
+                    with patch("subprocess.run", side_effect=mock_subp_run):
+                        res = sd.download_track(
+                            info=track_info,
+                            output_dir=td,
+                            audio_format="flac",
+                            show_progress=False,
+                        )
+
+            self.assertTrue(os.path.exists(res))
+            self.assertTrue(res.endswith(".flac"))
+            self.assertIn("flac", captured_cmd)
+            self.assertIn("-metadata", captured_cmd)
+            self.assertIn("title=Hit Song", captured_cmd)
+            self.assertIn("artist=Artist", captured_cmd)
+
+    def test_spotify_download_playlist_selection(self):
+        from unittest.mock import patch
+        from simple_downloader.spotify import SpotifyDownloader
+        import tempfile
+
+        sd = SpotifyDownloader()
+        pl_info = {
+            "id": "pl1",
+            "title": "Summer Vibes",
+            "entries": [
+                {"title": "Track 1", "track_title": "Track 1", "artist": "A1"},
+                {"title": "Track 2", "track_title": "Track 2", "artist": "A2"},
+                {"title": "Track 3", "track_title": "Track 3", "artist": "A3"},
+            ]
+        }
+
+        with tempfile.TemporaryDirectory() as td:
+            with patch.object(sd, "download_track", return_value="dummy_path") as mock_dt:
+                res = sd.download_playlist(
+                    info=pl_info,
+                    output_dir=td,
+                    playlist_items="2-3",
+                    show_progress=False,
+                )
+                self.assertEqual(mock_dt.call_count, 2)
+
+
 if __name__ == "__main__":
     unittest.main()

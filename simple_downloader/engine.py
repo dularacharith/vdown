@@ -19,6 +19,7 @@ from rich.progress import (
 from simple_downloader.direct_downloader import DirectDownloader
 from simple_downloader.scraper import WebpageVideoScraper
 from simple_downloader.tiktok import TikTokDownloader, is_tiktok_url
+from simple_downloader.spotify import SpotifyDownloader, is_spotify_url
 from simple_downloader.utils import (
     is_direct_media_url,
     format_bytes,
@@ -55,6 +56,16 @@ class DownloadEngine:
                 tt_info = tt.get_info(url)
                 if tt_info:
                     return tt_info
+            except Exception:
+                pass
+
+        # Specialized Spotify handler (tracks, playlists, albums)
+        if is_spotify_url(url):
+            try:
+                sp = SpotifyDownloader(console=self.console)
+                sp_info = sp.get_info(url)
+                if sp_info:
+                    return sp_info
             except Exception:
                 pass
 
@@ -257,6 +268,36 @@ class DownloadEngine:
                 )
             except Exception as e:
                 self.console.print(f"[yellow]TikTok watermark-free download failed: {e}. Trying fallback...[/yellow]")
+
+        # Specialized Spotify handler (tracks, playlists, albums)
+        if (info and info.get("is_spotify")) or is_spotify_url(url):
+            try:
+                sp = SpotifyDownloader(console=self.console)
+                sp_info = info if (info and info.get("is_spotify")) else sp.get_info(url)
+                if sp_info:
+                    if sp_info.get("is_playlist"):
+                        return sp.download_playlist(
+                            info=sp_info,
+                            output_dir=output_dir or "downloads",
+                            audio_format=audio_format,
+                            audio_quality=audio_quality,
+                            playlist_items=playlist_items,
+                            rate_limit=rate_limit,
+                            show_progress=show_progress,
+                        )
+                    else:
+                        return sp.download_track(
+                            info=sp_info,
+                            output_path=output_path,
+                            output_dir=output_dir or "downloads",
+                            audio_format=audio_format,
+                            audio_quality=audio_quality,
+                            rate_limit=rate_limit,
+                            show_progress=show_progress,
+                        )
+            except Exception as e:
+                self.console.print(f"[yellow]Spotify download failed: {e}.[/yellow]")
+                raise e
 
         # If info indicated direct stream or scraper extracted an embedded stream URL
         if info and info.get("is_direct"):

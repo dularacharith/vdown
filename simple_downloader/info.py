@@ -20,23 +20,44 @@ def display_media_info(info: Dict[str, Any], console: Console) -> None:
         entries = info.get("entries") or []
         count = info.get("playlist_count") or len(entries)
         details.append("Type: ", style="bold yellow")
-        details.append("YouTube Playlist\n")
-        details.append("Playlist Title: ", style="bold cyan")
-        details.append(f"{title}\n")
-        details.append("Channel/Curator: ", style="bold cyan")
-        details.append(f"{uploader}\n")
-        details.append("Total Videos: ", style="bold cyan")
-        details.append(f"{count} items\n")
-        if entries and len(entries) > 0:
-            first_entry = entries[0]
-            first_title = first_entry.get("title", "Item 1") if isinstance(first_entry, dict) else "Item 1"
-            details.append("First Video: ", style="dim cyan")
-            details.append(f"{first_title}\n")
-            if len(entries) > 1:
-                last_entry = entries[-1]
-                last_title = last_entry.get("title", f"Item {len(entries)}") if isinstance(last_entry, dict) else f"Item {len(entries)}"
-                details.append("Last Video: ", style="dim cyan")
-                details.append(f"{last_title}\n")
+        if info.get("is_spotify"):
+            s_type = info.get("spotify_type", "playlist").capitalize()
+            details.append(f"Spotify {s_type}\n")
+            details.append(f"{s_type} Title: ", style="bold cyan")
+            details.append(f"{title}\n")
+            if uploader and uploader != "N/A":
+                details.append("Curator/Artist: ", style="bold cyan")
+                details.append(f"{uploader}\n")
+            details.append("Total Tracks: ", style="bold cyan")
+            details.append(f"{count} tracks\n")
+            if entries and len(entries) > 0:
+                first_entry = entries[0]
+                first_title = first_entry.get("title", "Track 1") if isinstance(first_entry, dict) else "Track 1"
+                details.append("First Track: ", style="dim cyan")
+                details.append(f"{first_title}\n")
+                if len(entries) > 1:
+                    last_entry = entries[-1]
+                    last_title = last_entry.get("title", f"Track {len(entries)}") if isinstance(last_entry, dict) else f"Track {len(entries)}"
+                    details.append("Last Track: ", style="dim cyan")
+                    details.append(f"{last_title}\n")
+        else:
+            details.append("YouTube Playlist\n")
+            details.append("Playlist Title: ", style="bold cyan")
+            details.append(f"{title}\n")
+            details.append("Channel/Curator: ", style="bold cyan")
+            details.append(f"{uploader}\n")
+            details.append("Total Videos: ", style="bold cyan")
+            details.append(f"{count} items\n")
+            if entries and len(entries) > 0:
+                first_entry = entries[0]
+                first_title = first_entry.get("title", "Item 1") if isinstance(first_entry, dict) else "Item 1"
+                details.append("First Video: ", style="dim cyan")
+                details.append(f"{first_title}\n")
+                if len(entries) > 1:
+                    last_entry = entries[-1]
+                    last_title = last_entry.get("title", f"Item {len(entries)}") if isinstance(last_entry, dict) else f"Item {len(entries)}"
+                    details.append("Last Video: ", style="dim cyan")
+                    details.append(f"{last_title}\n")
     else:
         duration = format_duration(info.get("duration"))
         views = f"{info['view_count']:,}" if info.get("view_count") is not None else "N/A"
@@ -50,8 +71,9 @@ def display_media_info(info: Dict[str, Any], console: Console) -> None:
         details.append(f"{uploader}\n")
         details.append("Duration: ", style="bold cyan")
         details.append(f"{duration}\n")
-        details.append("Views: ", style="bold cyan")
-        details.append(f"{views}\n")
+        if views != "N/A":
+            details.append("Views: ", style="bold cyan")
+            details.append(f"{views}\n")
         details.append("Upload Date: ", style="bold cyan")
         details.append(f"{upload_date}\n")
 
@@ -67,6 +89,12 @@ def display_media_info(info: Dict[str, Any], console: Console) -> None:
             if info.get("is_photo"):
                 details.append("Post Type: ", style="bold magenta")
                 details.append(f"Photo Carousel / Slideshow ({len(info.get('images', []))} slides)\n")
+        elif info.get("is_spotify"):
+            details.append("Platform: ", style="bold green")
+            details.append("Spotify (Lossless / High-Fidelity Audio)\n")
+            if info.get("album"):
+                details.append("Album: ", style="bold cyan")
+                details.append(f"{info['album']}\n")
 
     console.print(
         Panel(
