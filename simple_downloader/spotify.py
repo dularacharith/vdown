@@ -16,7 +16,11 @@ from typing import Optional, Dict, Any, List, Tuple
 import requests
 from rich.console import Console
 
-from simple_downloader.utils import sanitize_filename
+from simple_downloader.utils import (
+    sanitize_filename,
+    embed_wav_cover_art,
+    build_vorbis_picture_block,
+)
 
 SPOTIFY_URL_REGEX = re.compile(
     r"^(?:https?://(?:open\.)?spotify\.com/(?:intl-[a-zA-Z_-]+/)?(track|playlist|album)/([a-zA-Z0-9]+)"
@@ -377,14 +381,14 @@ class SpotifyDownloader:
 
             cmd = ["ffmpeg", "-y", "-i", raw_audio_file]
             has_cover = bool(cover_file and os.path.exists(cover_file))
+            fmt = audio_format.lower()
 
-            if has_cover and audio_format.lower() in ("mp3", "flac", "m4a"):
+            if has_cover and fmt in ("mp3", "flac", "m4a", "aac"):
                 cmd += ["-i", cover_file, "-map", "0:a", "-map", "1:v"]
             else:
                 cmd += ["-map", "0:a"]
 
             # Codec & Bitrate parameters
-            fmt = audio_format.lower()
             if fmt == "flac":
                 cmd += ["-c:a", "flac"]
                 if has_cover:
@@ -408,10 +412,14 @@ class SpotifyDownloader:
                 q = audio_quality.rstrip("kK") if audio_quality else "320"
                 cmd += ["-c:a", "aac", "-b:a", f"{q}k"]
                 if has_cover:
-                    cmd += ["-c:v", "copy", "-disposition:v:0", "attached_pic"]
-            elif fmt == "opus":
+                    cmd += ["-c:v", "mjpeg", "-disposition:v:0", "attached_pic"]
+            elif fmt in ("opus", "ogg", "vorbis"):
                 q = audio_quality.rstrip("kK") if audio_quality else "320"
-                cmd += ["-c:a", "libopus", "-b:a", f"{q}k"]
+                cmd += ["-c:a", "libopus" if fmt == "opus" else "libvorbis", "-b:a", f"{q}k"]
+                if has_cover:
+                    b64_pic = build_vorbis_picture_block(cover_file)
+                    if b64_pic:
+                        cmd += ["-metadata", f"METADATA_BLOCK_PICTURE={b64_pic}"]
             else:
                 cmd += ["-c:a", "copy"]
 
@@ -445,6 +453,10 @@ class SpotifyDownloader:
                     fallback_cmd += ["-c:a", "libmp3lame", "-b:a", f"{q}k"]
                 fallback_cmd.append(str(target_path))
                 subprocess.run(fallback_cmd, capture_output=True, text=True)
+
+            # If format is WAV and cover_file exists, embed the splash art ID3v2 APIC chunk into the WAV file!
+            if has_cover and fmt == "wav" and os.path.exists(str(target_path)):
+                embed_wav_cover_art(str(target_path), cover_file)
 
             return str(target_path)
 
@@ -498,6 +510,19 @@ class SpotifyDownloader:
         base_dest = Path(output_dir or "downloads").expanduser().resolve()
         playlist_folder = base_dest / sanitize_filename(pl_title)
         playlist_folder.mkdir(parents=True, exist_ok=True)
+
+        # Save playlist splash art image as cover.jpg inside the folder
+        cover_url = info.get("thumbnail")
+        if cover_url:
+            pl_cover_dest = playlist_folder / "cover.jpg"
+            if not pl_cover_dest.exists():
+                try:
+                    c_resp = requests.get(cover_url, headers=self.DEFAULT_HEADERS, timeout=10)
+                    if c_resp.status_code == 200 and len(c_resp.content) > 0:
+                        with open(pl_cover_dest, "wb") as pf:
+                            pf.write(c_resp.content)
+                except Exception:
+                    pass
 
         total_selected = len(selected_entries)
         self.console.print(

@@ -94,17 +94,19 @@ vdown "https://www.youtube.com/watch?v=..." -a -aq 256
 ```
 
 ### 4. Spotify Tracks, Playlists & Albums (FLAC, WAV, 320k MP3)
+All audio downloads include high-resolution embedded album splash art across **all formats** (WAV, FLAC, MP3, M4A, OPUS), plus a folder `cover.jpg` for playlists.
+
 ```bash
-# Download Spotify track as high quality 320 kbps MP3 (default)
+# Download Spotify track as high quality 320 kbps MP3 (default) with embedded cover art
 vdown "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT"
 
-# Download Spotify track as bit-perfect lossless FLAC with embedded 640x640 album art
+# Download Spotify track as bit-perfect lossless FLAC with embedded album art
 vdown "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT" --audio-format flac
 
-# Download Spotify track as uncompressed lossless WAV
+# Download Spotify track as uncompressed lossless WAV with embedded ID3v2 APIC splash art
 vdown "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT" --audio-format wav
 
-# Download full Spotify playlist / album into organized directory with track numbers
+# Download full Spotify playlist / album into organized directory with track numbers & cover.jpg
 vdown "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M"
 
 # Download specific items from Spotify playlist as lossless FLAC

@@ -773,6 +773,44 @@ class TestSpotifyDownloader(unittest.TestCase):
                 )
                 self.assertEqual(mock_dt.call_count, 2)
 
+    def test_embed_wav_cover_art_utility(self):
+        from simple_downloader.utils import embed_wav_cover_art
+        import subprocess
+        import tempfile
+        import json
+
+        with tempfile.TemporaryDirectory() as td:
+            wav_file = os.path.join(td, "test.wav")
+            subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo", "-t", "1", wav_file], capture_output=True, check=True)
+            cover_jpg = os.path.join(td, "cover.jpg")
+            subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=blue:s=100x100", "-vframes", "1", cover_jpg], capture_output=True, check=True)
+
+            success = embed_wav_cover_art(wav_file, cover_jpg)
+            self.assertTrue(success)
+
+            probe = subprocess.run(["ffprobe", "-v", "quiet", "-print_format", "json", "-show_streams", wav_file], capture_output=True, text=True)
+            data = json.loads(probe.stdout)
+            self.assertEqual(len(data.get("streams", [])), 2)
+            stream_codecs = [s.get("codec_name") for s in data.get("streams", [])]
+            self.assertIn("pcm_s16le", stream_codecs)
+            self.assertIn("mjpeg", stream_codecs)
+            attached_pics = [s.get("disposition", {}).get("attached_pic") for s in data.get("streams", [])]
+            self.assertIn(1, attached_pics)
+
+    def test_build_vorbis_picture_block_utility(self):
+        from simple_downloader.utils import build_vorbis_picture_block
+        import subprocess
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as td:
+            cover_jpg = os.path.join(td, "cover.jpg")
+            subprocess.run(["ffmpeg", "-y", "-f", "lavfi", "-i", "color=c=green:s=200x200", "-vframes", "1", cover_jpg], capture_output=True, check=True)
+
+            b64_pic = build_vorbis_picture_block(cover_jpg)
+            self.assertIsNotNone(b64_pic)
+            self.assertTrue(isinstance(b64_pic, str))
+            self.assertGreater(len(b64_pic), 50)
+
 
 if __name__ == "__main__":
     unittest.main()

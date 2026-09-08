@@ -1,6 +1,8 @@
 """Utility functions for simple-downloader."""
 
+import base64
 import re
+import struct
 import urllib.parse
 from typing import Optional, Dict
 
@@ -139,3 +141,84 @@ def parse_speed_limit(limit_str: Optional[str]) -> Optional[int]:
     number, unit = match.groups()
     multiplier = units.get(unit, 1)
     return int(float(number) * multiplier)
+
+
+def embed_wav_cover_art(wav_path: str, cover_path: str) -> bool:
+    """Embed an ID3v2 APIC chunk containing the cover splash art into a WAV file."""
+    try:
+        with open(cover_path, "rb") as cf:
+            img_data = cf.read()
+        if not img_data:
+            return False
+
+        mime = b"image/png\x00" if img_data.startswith(b"\x89PNG") else b"image/jpeg\x00"
+        apic_payload = b"\x00" + mime + b"\x03\x00" + img_data
+        apic_frame = b"APIC" + struct.pack(">I", len(apic_payload)) + b"\x00\x00" + apic_payload
+        id3_len = len(apic_frame)
+        syncsafe_size = (
+            ((id3_len >> 21) & 0x7F) << 24
+            | ((id3_len >> 14) & 0x7F) << 16
+            | ((id3_len >> 7) & 0x7F) << 8
+            | (id3_len & 0x7F)
+        )
+        id3_tag = b"ID3\x03\x00\x00" + struct.pack(">I", syncsafe_size) + apic_frame
+        id3_chunk = b"id3 " + struct.pack("<I", len(id3_tag)) + id3_tag
+        if len(id3_tag) % 2 == 1:
+            id3_chunk += b"\x00"
+
+        with open(wav_path, "rb") as wf:
+            wav_data = wf.read()
+
+        if len(wav_data) < 12 or wav_data[:4] != b"RIFF" or wav_data[8:12] != b"WAVE":
+            return False
+
+        new_riff_size = len(wav_data) - 8 + len(id3_chunk)
+        tagged_wav = wav_data[:4] + struct.pack("<I", new_riff_size) + wav_data[8:] + id3_chunk
+
+        with open(wav_path, "wb") as wf:
+            wf.write(tagged_wav)
+        return True
+    except Exception:
+        return False
+
+
+def build_vorbis_picture_block(cover_path: str) -> Optional[str]:
+    """Build a base64-encoded METADATA_BLOCK_PICTURE for Vorbis/Opus comment embedding."""
+    try:
+        with open(cover_path, "rb") as cf:
+            img_data = cf.read()
+        if not img_data:
+            return None
+
+        mime = b"image/png" if img_data.startswith(b"\x89PNG") else b"image/jpeg"
+        width, height = 640, 640
+        if mime == b"image/jpeg" and len(img_data) > 4:
+            idx = 2
+            while idx < len(img_data) - 8:
+                if img_data[idx] == 0xFF:
+                    marker = img_data[idx + 1]
+                    if marker in (0xC0, 0xC2):
+                        height, width = struct.unpack(">HH", img_data[idx + 5 : idx + 9])
+                        break
+                    elif marker not in (0xD8, 0xD9, 0x00, 0xFF):
+                        length = struct.unpack(">H", img_data[idx + 2 : idx + 4])[0]
+                        idx += 2 + length
+                        continue
+                idx += 1
+        elif mime == b"image/png" and len(img_data) >= 24:
+            width, height = struct.unpack(">II", img_data[16:24])
+
+        desc = b"Cover (front)"
+        block = (
+            struct.pack(">I", 3)
+            + struct.pack(">I", len(mime))
+            + mime
+            + struct.pack(">I", len(desc))
+            + desc
+            + struct.pack(">IIII", width, height, 24, 0)
+            + struct.pack(">I", len(img_data))
+            + img_data
+        )
+        return base64.b64encode(block).decode("ascii")
+    except Exception:
+        return None
