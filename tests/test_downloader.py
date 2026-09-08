@@ -195,6 +195,7 @@ class TestCLIParser(unittest.TestCase):
         self.assertFalse(args.playlist)
         self.assertFalse(args.no_playlist)
         self.assertIsNone(args.playlist_items)
+        self.assertEqual(args.output_dir, "downloads")
 
     def test_parser_custom_options(self):
         parser = create_parser()
@@ -481,6 +482,7 @@ class TestPlaylistAndAudioEngine(unittest.TestCase):
         self.assertEqual(pps[0]["key"], "FFmpegExtractAudio")
         self.assertEqual(pps[0]["preferredcodec"], "mp3")
         self.assertEqual(pps[0]["preferredquality"], "320")
+        self.assertIn("downloads", captured_opts.get("outtmpl", ""))
 
     def test_engine_playlist_options(self):
         from unittest.mock import patch, MagicMock

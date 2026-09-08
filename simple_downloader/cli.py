@@ -93,8 +93,8 @@ def create_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "-d", "--dir",
         dest="output_dir",
-        default=".",
-        help="Output destination directory (default: current directory)",
+        default="downloads",
+        help="Output destination directory (default: downloads)",
     )
 
     parser.add_argument(
@@ -293,7 +293,7 @@ def _run_interactive_mode_impl(engine: DownloadEngine, initial_url: Optional[str
         if not Confirm.ask("\nProceed to download a specific format?", default=True):
             return 0
         format_id = Prompt.ask("Enter Format ID to download")
-        out_dir = Prompt.ask("Output directory", default=".")
+        out_dir = Prompt.ask("Output directory", default="downloads")
         return do_download(
             engine=engine,
             url=url,
@@ -395,7 +395,7 @@ def _run_interactive_mode_impl(engine: DownloadEngine, initial_url: Optional[str
             o_map = {"1": "320", "2": "256", "3": "160", "4": "128"}
             audio_quality = o_map[o_choice]
 
-    out_dir = Prompt.ask("\nDestination directory", default=".")
+    out_dir = Prompt.ask("\nDestination directory", default="downloads")
 
     return do_download(
         engine=engine,
@@ -416,7 +416,7 @@ def do_download(
     engine: DownloadEngine,
     url: str,
     output_path: Optional[str] = None,
-    output_dir: Optional[str] = None,
+    output_dir: Optional[str] = "downloads",
     quality: str = "best",
     format_id: Optional[str] = None,
     audio_only: bool = False,
@@ -439,11 +439,12 @@ def do_download(
 ) -> int:
     """Execute download and print summary."""
     try:
+        target_dir = output_dir or "downloads"
         console.print(f"\n[bold green]Starting download:[/bold green] [underline cyan]{url}[/underline cyan]")
         result = engine.download(
             url=url,
             output_path=output_path,
-            output_dir=output_dir,
+            output_dir=target_dir,
             quality=quality,
             format_id=format_id,
             audio_only=audio_only,

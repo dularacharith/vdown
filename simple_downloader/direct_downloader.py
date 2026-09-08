@@ -47,7 +47,7 @@ class DirectDownloader:
         self,
         url: str,
         output_path: Optional[str] = None,
-        output_dir: Optional[str] = None,
+        output_dir: Optional[str] = "downloads",
         expected_size: Optional[int] = None,
         progress_callback: Optional[Callable[[int, Optional[int]], None]] = None,
         show_progress: bool = True,
@@ -77,12 +77,15 @@ class DirectDownloader:
 
         # 2. Determine target destination and filename
         if output_path:
-            target_file = Path(output_path).expanduser().resolve()
-            if output_dir:
-                target_file = Path(output_dir).expanduser().resolve() / target_file.name
+            p = Path(output_path).expanduser()
+            if p.is_absolute() or len(p.parts) > 1:
+                target_file = p.resolve()
+            else:
+                dest_dir = Path(output_dir or "downloads").expanduser().resolve()
+                target_file = dest_dir / p.name
         else:
             filename = get_filename_from_headers_or_url(url, response_headers)
-            dest_dir = Path(output_dir or ".").expanduser().resolve()
+            dest_dir = Path(output_dir or "downloads").expanduser().resolve()
             dest_dir.mkdir(parents=True, exist_ok=True)
             target_file = dest_dir / filename
 

@@ -163,7 +163,7 @@ class TikTokDownloader:
         self,
         info: Dict[str, Any],
         output_path: Optional[str] = None,
-        output_dir: Optional[str] = None,
+        output_dir: Optional[str] = "downloads",
         audio_only: bool = False,
         audio_format: str = "mp3",
         audio_quality: str = "320",
@@ -171,7 +171,7 @@ class TikTokDownloader:
         show_progress: bool = True,
     ) -> str:
         """Download TikTok media without watermark and with live progress feedback."""
-        dest_dir = Path(output_dir or ".").expanduser().resolve()
+        dest_dir = Path(output_dir or "downloads").expanduser().resolve()
         dest_dir.mkdir(parents=True, exist_ok=True)
 
         is_photo = info.get("is_photo", False)

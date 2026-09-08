@@ -204,7 +204,7 @@ class DownloadEngine:
         self,
         url: str,
         output_path: Optional[str] = None,
-        output_dir: Optional[str] = None,
+        output_dir: Optional[str] = "downloads",
         quality: Optional[str] = "best",
         format_id: Optional[str] = None,
         audio_only: bool = False,
@@ -248,7 +248,7 @@ class DownloadEngine:
                 return tt.download(
                     info=info,
                     output_path=output_path,
-                    output_dir=output_dir,
+                    output_dir=output_dir or "downloads",
                     audio_only=audio_only,
                     audio_format=audio_format,
                     audio_quality=audio_quality,
@@ -274,7 +274,7 @@ class DownloadEngine:
                         output_dir=temp_dir,
                         show_progress=show_progress,
                     )
-                    dest_dir = Path(output_dir or ".").expanduser().resolve()
+                    dest_dir = Path(output_dir or "downloads").expanduser().resolve()
                     dest_dir.mkdir(parents=True, exist_ok=True)
                     if output_path:
                         final_name = Path(output_path).name
@@ -314,22 +314,31 @@ class DownloadEngine:
                 return downloader.download(
                     url=target_download_url,
                     output_path=output_path,
-                    output_dir=output_dir,
+                    output_dir=output_dir or "downloads",
                     show_progress=show_progress,
                 )
 
         # 2. Build yt-dlp options
-        dest_dir = Path(output_dir or ".").expanduser().resolve()
+        dest_dir = Path(output_dir or "downloads").expanduser().resolve()
         dest_dir.mkdir(parents=True, exist_ok=True)
 
         if output_path:
-            p = Path(output_path)
-            if audio_only and p.suffix.lower().lstrip(".") == audio_format.lower():
-                out_template = str(dest_dir / p.stem)
-            elif video_format and p.suffix.lower().lstrip(".") == video_format.lower():
-                out_template = str(dest_dir / p.stem)
+            p = Path(output_path).expanduser()
+            if p.is_absolute() or len(p.parts) > 1:
+                base_target = p.parent
+                stem_name = p.stem
+                full_name = p.name
             else:
-                out_template = str(dest_dir / p.name)
+                base_target = dest_dir
+                stem_name = p.stem
+                full_name = p.name
+
+            if audio_only and p.suffix.lower().lstrip(".") == audio_format.lower():
+                out_template = str(base_target / stem_name)
+            elif video_format and p.suffix.lower().lstrip(".") == video_format.lower():
+                out_template = str(base_target / stem_name)
+            else:
+                out_template = str(base_target / full_name)
         elif playlist:
             if audio_only:
                 out_template = str(dest_dir / "%(playlist_title,playlist|Playlist)s/%(playlist_index|0)02d - %(title).200B.%(ext)s")
@@ -541,7 +550,7 @@ class DownloadEngine:
                             return self.download(
                                 url=cand["url"],
                                 output_path=output_path,
-                                output_dir=output_dir,
+                                output_dir=output_dir or "downloads",
                                 quality=quality,
                                 format_id=format_id,
                                 audio_only=audio_only,
@@ -560,7 +569,7 @@ class DownloadEngine:
                     return downloader.download(
                         url=url,
                         output_path=output_path,
-                        output_dir=output_dir,
+                        output_dir=output_dir or "downloads",
                         show_progress=show_progress,
                     )
                 raise e

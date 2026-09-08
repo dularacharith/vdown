@@ -32,7 +32,10 @@ htmlcov/
 # Temporary and download files
 *.part
 *.tmp
-downloads/
+downloads/*
+!downloads/.gitkeep
+Downloads/*
+!Downloads/.gitkeep
 test_*/
 
 # IDE & Editor

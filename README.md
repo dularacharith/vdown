@@ -145,7 +145,7 @@ vdown -b links.txt -d ~/Downloads
 | `--playlist-items` | Indices/range of playlist items to download (e.g. `1-5`, `1,3,5`) | All |
 | `--format` | Container format (`mp4`, `mkv`, `webm`) | `mp4` |
 | `-o`, `--output` | Custom destination filename | Auto |
-| `-d`, `--dir` | Output directory path | Current dir |
+| `-d`, `--dir` | Output directory path | `downloads` |
 | `-b`, `--batch` | Text file containing list of URLs to download | None |
 | `--browser` | Extract cookies from browser (`chromium`, `brave`, `chrome`, `firefox`) | None |
 | `--cookies` | Path to Netscape-format cookies file | None |
