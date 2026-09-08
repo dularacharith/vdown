@@ -191,8 +191,17 @@ def create_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def run_interactive_mode(engine: DownloadEngine, initial_url: Optional[str] = None):
+def run_interactive_mode(engine: DownloadEngine, initial_url: Optional[str] = None) -> int:
     """Run friendly interactive download wizard."""
+    try:
+        return _run_interactive_mode_impl(engine, initial_url)
+    except KeyboardInterrupt:
+        console.print("\n[bold yellow]👋 Goodbye![/bold yellow]")
+        return 130
+
+
+def _run_interactive_mode_impl(engine: DownloadEngine, initial_url: Optional[str] = None) -> int:
+    """Implementation of interactive download wizard."""
     console.print(
         Panel(
             Text(
@@ -275,7 +284,7 @@ def run_interactive_mode(engine: DownloadEngine, initial_url: Optional[str] = No
             choice = "5"
 
     if choice == "5":
-        console.print("[dim]Aborted.[/dim]")
+        console.print("\n[bold yellow]👋 Goodbye![/bold yellow]")
         return 0
 
     if choice == "4" and not is_playlist:
@@ -475,7 +484,7 @@ def do_download(
         )
         return 0
     except KeyboardInterrupt:
-        console.print("\n[yellow]Download interrupted by user.[/yellow]")
+        console.print("\n[bold yellow]👋 Goodbye![/bold yellow]")
         return 130
     except Exception as e:
         console.print(f"\n[bold red]Error during download:[/bold red] {e}")
@@ -502,11 +511,93 @@ def process_batch_file(filepath: str, engine: DownloadEngine, args: argparse.Nam
 
     rate_limit_val = parse_speed_limit(args.rate_limit)
 
-    for idx, url in enumerate(lines, 1):
-        console.print(f"[bold yellow][{idx}/{len(lines)}][/bold yellow] Processing {url}")
-        res = do_download(
+    try:
+        for idx, url in enumerate(lines, 1):
+            console.print(f"[bold yellow][{idx}/{len(lines)}][/bold yellow] Processing {url}")
+            res = do_download(
+                engine=engine,
+                url=url,
+                output_dir=args.output_dir,
+                quality=args.quality,
+                format_id=args.format_id,
+                audio_only=args.audio_only,
+                audio_format=args.audio_format,
+                audio_quality=args.audio_quality,
+                video_format=args.video_format,
+                rate_limit=rate_limit_val,
+                subtitles=args.subtitles,
+                sub_lang=args.sub_lang,
+                embed_subs=args.embed_subs,
+                embed_thumbnail=args.embed_thumbnail,
+                embed_metadata=args.embed_metadata,
+                playlist=args.playlist,
+                playlist_items=args.playlist_items,
+                browser=args.browser,
+                cookie_file=args.cookie_file,
+                proxy=args.proxy,
+                user_agent=args.user_agent,
+                referer=args.referer,
+            )
+            if res == 0:
+                success += 1
+            elif res == 130:
+                return 130
+            else:
+                failed += 1
+
+        console.print(f"\n[bold]Batch Summary:[/bold] [green]{success} Succeeded[/green], [red]{failed} Failed[/red]")
+        return 0 if failed == 0 else 1
+    except KeyboardInterrupt:
+        console.print("\n[bold yellow]👋 Goodbye![/bold yellow]")
+        return 130
+
+
+def main(argv: Optional[List[str]] = None) -> int:
+    """Main CLI entrypoint."""
+    try:
+        parser = create_parser()
+        args = parser.parse_args(argv)
+
+        engine = DownloadEngine(console_instance=console)
+
+        # If no URL and no batch and interactive flag or just `vdown` with no args:
+        if (not args.url and not args.batch) or args.interactive:
+            return run_interactive_mode(engine, initial_url=args.url)
+
+        # Batch mode
+        if args.batch:
+            return process_batch_file(args.batch, engine, args)
+
+        # Single URL inspection mode (--info)
+        if args.info:
+            try:
+                with console.status("[cyan]Fetching media info...[/cyan]"):
+                    info = engine.get_media_info(
+                        args.url,
+                        browser=args.browser,
+                        cookie_file=args.cookie_file,
+                        proxy=args.proxy,
+                        user_agent=args.user_agent,
+                        referer=args.referer,
+                    )
+                display_media_info(info, console)
+                formats = engine.list_formats(info)
+                display_formats_table(formats, console)
+                return 0
+            except Exception as e:
+                console.print(f"[bold red]Failed to fetch info:[/bold red] {e}")
+                return 1
+
+        # Single URL download mode
+        rate_limit_val = parse_speed_limit(args.rate_limit)
+
+        is_pure_playlist = bool(args.url and ("playlist?list=" in args.url.lower()))
+        playlist = (args.playlist or is_pure_playlist or bool(args.playlist_items)) and not args.no_playlist
+
+        return do_download(
             engine=engine,
-            url=url,
+            url=args.url,
+            output_path=args.output,
             output_dir=args.output_dir,
             quality=args.quality,
             format_id=args.format_id,
@@ -520,7 +611,7 @@ def process_batch_file(filepath: str, engine: DownloadEngine, args: argparse.Nam
             embed_subs=args.embed_subs,
             embed_thumbnail=args.embed_thumbnail,
             embed_metadata=args.embed_metadata,
-            playlist=args.playlist,
+            playlist=playlist,
             playlist_items=args.playlist_items,
             browser=args.browser,
             cookie_file=args.cookie_file,
@@ -528,81 +619,9 @@ def process_batch_file(filepath: str, engine: DownloadEngine, args: argparse.Nam
             user_agent=args.user_agent,
             referer=args.referer,
         )
-        if res == 0:
-            success += 1
-        else:
-            failed += 1
-
-    console.print(f"\n[bold]Batch Summary:[/bold] [green]{success} Succeeded[/green], [red]{failed} Failed[/red]")
-    return 0 if failed == 0 else 1
-
-
-def main(argv: Optional[List[str]] = None) -> int:
-    """Main CLI entrypoint."""
-    parser = create_parser()
-    args = parser.parse_args(argv)
-
-    engine = DownloadEngine(console_instance=console)
-
-    # If no URL and no batch and interactive flag or just `vdown` with no args:
-    if (not args.url and not args.batch) or args.interactive:
-        return run_interactive_mode(engine, initial_url=args.url)
-
-    # Batch mode
-    if args.batch:
-        return process_batch_file(args.batch, engine, args)
-
-    # Single URL inspection mode (--info)
-    if args.info:
-        try:
-            with console.status("[cyan]Fetching media info...[/cyan]"):
-                info = engine.get_media_info(
-                    args.url,
-                    browser=args.browser,
-                    cookie_file=args.cookie_file,
-                    proxy=args.proxy,
-                    user_agent=args.user_agent,
-                    referer=args.referer,
-                )
-            display_media_info(info, console)
-            formats = engine.list_formats(info)
-            display_formats_table(formats, console)
-            return 0
-        except Exception as e:
-            console.print(f"[bold red]Failed to fetch info:[/bold red] {e}")
-            return 1
-
-    # Single URL download mode
-    rate_limit_val = parse_speed_limit(args.rate_limit)
-
-    is_pure_playlist = bool(args.url and ("playlist?list=" in args.url.lower()))
-    playlist = (args.playlist or is_pure_playlist or bool(args.playlist_items)) and not args.no_playlist
-
-    return do_download(
-        engine=engine,
-        url=args.url,
-        output_path=args.output,
-        output_dir=args.output_dir,
-        quality=args.quality,
-        format_id=args.format_id,
-        audio_only=args.audio_only,
-        audio_format=args.audio_format,
-        audio_quality=args.audio_quality,
-        video_format=args.video_format,
-        rate_limit=rate_limit_val,
-        subtitles=args.subtitles,
-        sub_lang=args.sub_lang,
-        embed_subs=args.embed_subs,
-        embed_thumbnail=args.embed_thumbnail,
-        embed_metadata=args.embed_metadata,
-        playlist=playlist,
-        playlist_items=args.playlist_items,
-        browser=args.browser,
-        cookie_file=args.cookie_file,
-        proxy=args.proxy,
-        user_agent=args.user_agent,
-        referer=args.referer,
-    )
+    except KeyboardInterrupt:
+        console.print("\n[bold yellow]👋 Goodbye![/bold yellow]")
+        return 130
 
 
 if __name__ == "__main__":

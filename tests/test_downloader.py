@@ -239,6 +239,33 @@ class TestCLIParser(unittest.TestCase):
         args = parser.parse_args(["https://example.com/watch?v=123&list=abc", "--no-playlist"])
         self.assertTrue(args.no_playlist)
 
+    def test_main_keyboard_interrupt_exits_gracefully(self):
+        from unittest.mock import patch
+        from simple_downloader.cli import main
+        import io
+
+        test_console_buf = io.StringIO()
+        with patch("simple_downloader.cli.console.print") as mock_print:
+            with patch("simple_downloader.cli.do_download", side_effect=KeyboardInterrupt):
+                exit_code = main(["https://example.com/video.mp4"])
+                self.assertEqual(exit_code, 130)
+                # Verify Goodbye was printed
+                calls = [str(call) for call in mock_print.call_args_list]
+                self.assertTrue(any("Goodbye" in c for c in calls))
+
+    def test_interactive_keyboard_interrupt_exits_gracefully(self):
+        from unittest.mock import patch
+        from simple_downloader.cli import run_interactive_mode
+        from simple_downloader.engine import DownloadEngine
+
+        engine = DownloadEngine()
+        with patch("simple_downloader.cli.console.print") as mock_print:
+            with patch("simple_downloader.cli.Prompt.ask", side_effect=KeyboardInterrupt):
+                exit_code = run_interactive_mode(engine)
+                self.assertEqual(exit_code, 130)
+                calls = [str(call) for call in mock_print.call_args_list]
+                self.assertTrue(any("Goodbye" in c for c in calls))
+
 
 class TestWebpageVideoScraper(unittest.TestCase):
     """Test webpage video scraper for embedded videos."""
