@@ -66,8 +66,16 @@ def create_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--audio-format",
         default="mp3",
-        choices=["mp3", "m4a", "flac", "wav", "opus", "aac"],
-        help="Audio format when extracting audio (default: mp3)",
+        choices=["mp3", "flac", "m4a", "wav", "opus", "aac"],
+        help="Audio format when extracting audio: mp3, flac, m4a, wav, opus, aac (default: mp3)",
+    )
+
+    parser.add_argument(
+        "-aq", "--audio-quality",
+        dest="audio_quality",
+        default="320",
+        choices=["320", "256", "192", "128", "0"],
+        help="Audio quality bitrate in kbps: 320, 256, 192, 128, or 0 (best VBR) (default: 320)",
     )
 
     parser.add_argument(
@@ -164,6 +172,12 @@ def create_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument(
+        "--no-playlist",
+        action="store_true",
+        help="Download only the single video if URL refers to both video and playlist",
+    )
+
+    parser.add_argument(
         "--playlist-items",
         help="Indices of playlist items to download (e.g. 1-5, 1,3,5)",
     )
@@ -222,20 +236,49 @@ def run_interactive_mode(engine: DownloadEngine, initial_url: Optional[str] = No
 
     display_media_info(info, console)
 
+    # Detect playlist presence in link
+    is_playlist = info.get("is_playlist", False) or ("list=" in url.lower())
+    playlist = False
+    playlist_items = None
+
+    if is_playlist:
+        entry_count = info.get("playlist_count") or len(info.get("entries") or [])
+        count_str = f" ({entry_count} videos)" if entry_count else ""
+        console.print(f"\n[bold yellow]📂 YouTube Playlist Detected{count_str}[/bold yellow]")
+        console.print("  [1] 📥 Download Entire Playlist [Default]")
+        console.print("  [2] 🔢 Download Specific Range / Items (e.g. 1-10, 1,3,5)")
+        console.print("  [3] 🎬 Download Single Video Only")
+        pl_choice = Prompt.ask("Playlist Selection", choices=["1", "2", "3"], default="1")
+        if pl_choice == "1":
+            playlist = True
+        elif pl_choice == "2":
+            playlist = True
+            playlist_items = Prompt.ask(
+                "Enter item range to download (e.g. 1-10, 1,3,5, 1-end)",
+                default="1-5",
+            )
+        elif pl_choice == "3":
+            playlist = False
+
     console.print("\n[bold yellow]What would you like to do?[/bold yellow]")
     console.print("  [1] 🌟 Best Quality Video (Video + Audio)")
     console.print("  [2] 🎯 Choose Specific Resolution / Quality")
-    console.print("  [3] 🎵 Audio Only (MP3)")
-    console.print("  [4] 📋 List All Available Formats")
-    console.print("  [5] ❌ Exit")
-
-    choice = Prompt.ask("Select option", choices=["1", "2", "3", "4", "5"], default="1")
+    console.print("  [3] 🎵 Audio Only (MP3, FLAC Lossless, M4A, WAV, etc.)")
+    if not is_playlist:
+        console.print("  [4] 📋 List All Available Formats")
+        console.print("  [5] ❌ Exit")
+        choice = Prompt.ask("Select option", choices=["1", "2", "3", "4", "5"], default="1")
+    else:
+        console.print("  [4] ❌ Exit")
+        choice = Prompt.ask("Select option", choices=["1", "2", "3", "4"], default="1")
+        if choice == "4":
+            choice = "5"
 
     if choice == "5":
         console.print("[dim]Aborted.[/dim]")
         return 0
 
-    if choice == "4":
+    if choice == "4" and not is_playlist:
         formats = engine.list_formats(info)
         display_formats_table(formats, console)
         if not Confirm.ask("\nProceed to download a specific format?", default=True):
@@ -253,6 +296,8 @@ def run_interactive_mode(engine: DownloadEngine, initial_url: Optional[str] = No
     quality = "best"
     format_id = None
     audio_only = False
+    audio_format = "mp3"
+    audio_quality = "320"
 
     if choice == "2":
         console.print("\n[bold cyan]Select Resolution:[/bold cyan]")
@@ -261,18 +306,85 @@ def run_interactive_mode(engine: DownloadEngine, initial_url: Optional[str] = No
         console.print("  [3] 1080p Full HD")
         console.print("  [4] 720p HD")
         console.print("  [5] 480p SD")
-        console.print("  [6] View full raw format table")
-        q_choice = Prompt.ask("Choice", choices=["1", "2", "3", "4", "5", "6"], default="3")
+        if not is_playlist:
+            console.print("  [6] View full raw format table")
+            q_choice = Prompt.ask("Choice", choices=["1", "2", "3", "4", "5", "6"], default="3")
+        else:
+            q_choice = Prompt.ask("Choice", choices=["1", "2", "3", "4", "5"], default="3")
         q_map = {"1": "4k", "2": "1440p", "3": "1080p", "4": "720p", "5": "480p"}
         if q_choice in q_map:
             quality = q_map[q_choice]
-        else:
+        elif q_choice == "6" and not is_playlist:
             formats = engine.list_formats(info)
             display_formats_table(formats, console)
             format_id = Prompt.ask("Enter Format ID to download")
 
     elif choice == "3":
         audio_only = True
+        console.print("\n[bold cyan]Select Audio Format:[/bold cyan]")
+        console.print("  [1] 🎵 MP3 (Selectable Bitrate: 320k, 256k, 192k, 128k) [Default]")
+        console.print("  [2] 🎼 FLAC Lossless (Studio Quality - Bit-Perfect Lossless)")
+        console.print("  [3] 📱 M4A / AAC (High Quality Apple/Mobile Compatible)")
+        console.print("  [4] 🎹 WAV (Lossless Uncompressed PCM Audio)")
+        console.print("  [5] 🌐 OPUS (Modern High-Efficiency Audio)")
+
+        fmt_choice = Prompt.ask("Audio Format", choices=["1", "2", "3", "4", "5"], default="1")
+
+        if fmt_choice == "1":
+            audio_format = "mp3"
+            console.print("\n[bold cyan]Select MP3 Bitrate:[/bold cyan]")
+            console.print("  [1] 💎 320 kbps (Extreme Quality - Maximum MP3 Bitrate) [Default]")
+            console.print("  [2] 🌟 256 kbps (Very High Quality)")
+            console.print("  [3] ⚡ 192 kbps (Standard High Quality)")
+            console.print("  [4] 📦 128 kbps (Compact File Size)")
+            console.print("  [5] 🎛 Best VBR (Variable Bitrate ~245 kbps, V0)")
+            console.print("  [6] ✏ Custom Bitrate")
+            br_choice = Prompt.ask("Bitrate Choice", choices=["1", "2", "3", "4", "5", "6"], default="1")
+            if br_choice == "1":
+                audio_quality = "320"
+            elif br_choice == "2":
+                audio_quality = "256"
+            elif br_choice == "3":
+                audio_quality = "192"
+            elif br_choice == "4":
+                audio_quality = "128"
+            elif br_choice == "5":
+                audio_quality = "0"
+            elif br_choice == "6":
+                custom_br = Prompt.ask("Enter bitrate in kbps (e.g. 320, 256, 192)", default="320")
+                audio_quality = custom_br.rstrip("kK")
+
+        elif fmt_choice == "2":
+            audio_format = "flac"
+            audio_quality = "0"
+            console.print("[bold green]✔ Selected FLAC Lossless (Studio Quality - Bit-Perfect Lossless)[/bold green]")
+
+        elif fmt_choice == "3":
+            audio_format = "m4a"
+            console.print("\n[bold cyan]Select M4A / AAC Bitrate:[/bold cyan]")
+            console.print("  [1] 320 kbps [Default]")
+            console.print("  [2] 256 kbps")
+            console.print("  [3] 192 kbps")
+            console.print("  [4] 128 kbps")
+            m_choice = Prompt.ask("Bitrate Choice", choices=["1", "2", "3", "4"], default="1")
+            m_map = {"1": "320", "2": "256", "3": "192", "4": "128"}
+            audio_quality = m_map[m_choice]
+
+        elif fmt_choice == "4":
+            audio_format = "wav"
+            audio_quality = "0"
+            console.print("[bold green]✔ Selected WAV Uncompressed Lossless PCM[/bold green]")
+
+        elif fmt_choice == "5":
+            audio_format = "opus"
+            console.print("\n[bold cyan]Select OPUS Bitrate:[/bold cyan]")
+            console.print("  [1] 320 kbps [Default]")
+            console.print("  [2] 256 kbps")
+            console.print("  [3] 160 kbps")
+            console.print("  [4] 128 kbps")
+            o_choice = Prompt.ask("Bitrate Choice", choices=["1", "2", "3", "4"], default="1")
+            o_map = {"1": "320", "2": "256", "3": "160", "4": "128"}
+            audio_quality = o_map[o_choice]
 
     out_dir = Prompt.ask("\nDestination directory", default=".")
 
@@ -282,6 +394,10 @@ def run_interactive_mode(engine: DownloadEngine, initial_url: Optional[str] = No
         quality=quality,
         format_id=format_id,
         audio_only=audio_only,
+        audio_format=audio_format,
+        audio_quality=audio_quality,
+        playlist=playlist,
+        playlist_items=playlist_items,
         output_dir=out_dir,
         browser=browser,
     )
@@ -296,6 +412,7 @@ def do_download(
     format_id: Optional[str] = None,
     audio_only: bool = False,
     audio_format: str = "mp3",
+    audio_quality: str = "320",
     video_format: Optional[str] = None,
     rate_limit: Optional[int] = None,
     subtitles: bool = False,
@@ -322,6 +439,7 @@ def do_download(
             format_id=format_id,
             audio_only=audio_only,
             audio_format=audio_format,
+            audio_quality=audio_quality,
             video_format=video_format,
             rate_limit=rate_limit,
             subtitles=subtitles,
@@ -340,8 +458,13 @@ def do_download(
 
         file_desc = f"[bold green]✔ Download Completed Successfully![/bold green]"
         if result and os.path.exists(result):
-            size_str = format_bytes(os.path.getsize(result))
-            file_desc += f"\n📁 [bold white]{result}[/bold white] ({size_str})"
+            if os.path.isdir(result):
+                items = [f for f in os.listdir(result) if not f.endswith(".part") and not f.startswith(".")]
+                file_desc = f"[bold green]✔ Playlist Download Completed ({len(items)} items)![/bold green]"
+                file_desc += f"\n📁 Folder: [bold white]{result}[/bold white]"
+            else:
+                size_str = format_bytes(os.path.getsize(result))
+                file_desc += f"\n📁 [bold white]{result}[/bold white] ({size_str})"
 
         console.print(
             Panel(
@@ -389,6 +512,7 @@ def process_batch_file(filepath: str, engine: DownloadEngine, args: argparse.Nam
             format_id=args.format_id,
             audio_only=args.audio_only,
             audio_format=args.audio_format,
+            audio_quality=args.audio_quality,
             video_format=args.video_format,
             rate_limit=rate_limit_val,
             subtitles=args.subtitles,
@@ -451,6 +575,9 @@ def main(argv: Optional[List[str]] = None) -> int:
     # Single URL download mode
     rate_limit_val = parse_speed_limit(args.rate_limit)
 
+    is_pure_playlist = bool(args.url and ("playlist?list=" in args.url.lower()))
+    playlist = (args.playlist or is_pure_playlist or bool(args.playlist_items)) and not args.no_playlist
+
     return do_download(
         engine=engine,
         url=args.url,
@@ -460,6 +587,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         format_id=args.format_id,
         audio_only=args.audio_only,
         audio_format=args.audio_format,
+        audio_quality=args.audio_quality,
         video_format=args.video_format,
         rate_limit=rate_limit_val,
         subtitles=args.subtitles,
@@ -467,7 +595,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         embed_subs=args.embed_subs,
         embed_thumbnail=args.embed_thumbnail,
         embed_metadata=args.embed_metadata,
-        playlist=args.playlist,
+        playlist=playlist,
         playlist_items=args.playlist_items,
         browser=args.browser,
         cookie_file=args.cookie_file,

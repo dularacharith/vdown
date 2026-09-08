@@ -10,44 +10,68 @@ from simple_downloader.utils import format_bytes, format_duration
 
 
 def display_media_info(info: Dict[str, Any], console: Console) -> None:
-    """Display high-level metadata about the media."""
+    """Display high-level metadata about the media or playlist."""
+    is_playlist = info.get("is_playlist", False)
     title = info.get("title", "Unknown Title")
     uploader = info.get("uploader") or info.get("channel") or info.get("creator") or "N/A"
-    duration = format_duration(info.get("duration"))
-    views = f"{info['view_count']:,}" if info.get("view_count") is not None else "N/A"
-    upload_date = info.get("upload_date", "N/A")
-    if upload_date and len(upload_date) == 8:
-        upload_date = f"{upload_date[:4]}-{upload_date[4:6]}-{upload_date[6:]}"
 
     details = Text()
-    details.append("Title: ", style="bold cyan")
-    details.append(f"{title}\n")
-    details.append("Author/Source: ", style="bold cyan")
-    details.append(f"{uploader}\n")
-    details.append("Duration: ", style="bold cyan")
-    details.append(f"{duration}\n")
-    details.append("Views: ", style="bold cyan")
-    details.append(f"{views}\n")
-    details.append("Upload Date: ", style="bold cyan")
-    details.append(f"{upload_date}\n")
+    if is_playlist:
+        entries = info.get("entries") or []
+        count = info.get("playlist_count") or len(entries)
+        details.append("Type: ", style="bold yellow")
+        details.append("YouTube Playlist\n")
+        details.append("Playlist Title: ", style="bold cyan")
+        details.append(f"{title}\n")
+        details.append("Channel/Curator: ", style="bold cyan")
+        details.append(f"{uploader}\n")
+        details.append("Total Videos: ", style="bold cyan")
+        details.append(f"{count} items\n")
+        if entries and len(entries) > 0:
+            first_entry = entries[0]
+            first_title = first_entry.get("title", "Item 1") if isinstance(first_entry, dict) else "Item 1"
+            details.append("First Video: ", style="dim cyan")
+            details.append(f"{first_title}\n")
+            if len(entries) > 1:
+                last_entry = entries[-1]
+                last_title = last_entry.get("title", f"Item {len(entries)}") if isinstance(last_entry, dict) else f"Item {len(entries)}"
+                details.append("Last Video: ", style="dim cyan")
+                details.append(f"{last_title}\n")
+    else:
+        duration = format_duration(info.get("duration"))
+        views = f"{info['view_count']:,}" if info.get("view_count") is not None else "N/A"
+        upload_date = info.get("upload_date", "N/A")
+        if upload_date and len(upload_date) == 8:
+            upload_date = f"{upload_date[:4]}-{upload_date[4:6]}-{upload_date[6:]}"
 
-    if info.get("is_direct"):
-        filesize = format_bytes(info.get("filesize"))
-        details.append("Type: ", style="bold green")
-        details.append("Direct File / Stream\n")
-        details.append("File Size: ", style="bold green")
-        details.append(f"{filesize}\n")
-    elif info.get("is_tiktok"):
-        details.append("Platform: ", style="bold green")
-        details.append("TikTok (Watermark-Free Engine)\n")
-        if info.get("is_photo"):
-            details.append("Post Type: ", style="bold magenta")
-            details.append(f"Photo Carousel / Slideshow ({len(info.get('images', []))} slides)\n")
+        details.append("Title: ", style="bold cyan")
+        details.append(f"{title}\n")
+        details.append("Author/Source: ", style="bold cyan")
+        details.append(f"{uploader}\n")
+        details.append("Duration: ", style="bold cyan")
+        details.append(f"{duration}\n")
+        details.append("Views: ", style="bold cyan")
+        details.append(f"{views}\n")
+        details.append("Upload Date: ", style="bold cyan")
+        details.append(f"{upload_date}\n")
+
+        if info.get("is_direct"):
+            filesize = format_bytes(info.get("filesize"))
+            details.append("Type: ", style="bold green")
+            details.append("Direct File / Stream\n")
+            details.append("File Size: ", style="bold green")
+            details.append(f"{filesize}\n")
+        elif info.get("is_tiktok"):
+            details.append("Platform: ", style="bold green")
+            details.append("TikTok (Watermark-Free Engine)\n")
+            if info.get("is_photo"):
+                details.append("Post Type: ", style="bold magenta")
+                details.append(f"Photo Carousel / Slideshow ({len(info.get('images', []))} slides)\n")
 
     console.print(
         Panel(
             details,
-            title="[bold yellow]Media Details[/bold yellow]",
+            title="[bold yellow]Media Details[/bold yellow]" if not is_playlist else "[bold yellow]Playlist Details[/bold yellow]",
             border_style="bright_blue",
             expand=False,
         )

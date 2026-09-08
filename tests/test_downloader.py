@@ -191,6 +191,10 @@ class TestCLIParser(unittest.TestCase):
         self.assertEqual(args.quality, "best")
         self.assertFalse(args.audio_only)
         self.assertEqual(args.audio_format, "mp3")
+        self.assertEqual(args.audio_quality, "320")
+        self.assertFalse(args.playlist)
+        self.assertFalse(args.no_playlist)
+        self.assertIsNone(args.playlist_items)
 
     def test_parser_custom_options(self):
         parser = create_parser()
@@ -199,9 +203,12 @@ class TestCLIParser(unittest.TestCase):
             "-q", "1080p",
             "-a",
             "--audio-format", "flac",
+            "-aq", "320",
             "-o", "song.flac",
             "-d", "/tmp",
             "--rate-limit", "2M",
+            "--playlist",
+            "--playlist-items", "1-10",
             "--embed-subs",
             "--embed-thumbnail",
             "--browser", "chromium",
@@ -213,9 +220,12 @@ class TestCLIParser(unittest.TestCase):
         self.assertEqual(args.quality, "1080p")
         self.assertTrue(args.audio_only)
         self.assertEqual(args.audio_format, "flac")
+        self.assertEqual(args.audio_quality, "320")
         self.assertEqual(args.output, "song.flac")
         self.assertEqual(args.output_dir, "/tmp")
         self.assertEqual(args.rate_limit, "2M")
+        self.assertTrue(args.playlist)
+        self.assertEqual(args.playlist_items, "1-10")
         self.assertTrue(args.embed_subs)
         self.assertTrue(args.embed_thumbnail)
         self.assertEqual(args.browser, "chromium")
@@ -223,6 +233,11 @@ class TestCLIParser(unittest.TestCase):
         self.assertEqual(args.proxy, "socks5://127.0.0.1:9050")
         self.assertEqual(args.user_agent, "CustomUA/1.0")
         self.assertEqual(args.referer, "https://instagram.com")
+
+    def test_parser_no_playlist_flag(self):
+        parser = create_parser()
+        args = parser.parse_args(["https://example.com/watch?v=123&list=abc", "--no-playlist"])
+        self.assertTrue(args.no_playlist)
 
 
 class TestWebpageVideoScraper(unittest.TestCase):
@@ -374,6 +389,114 @@ class TestTikTokDownloader(unittest.TestCase):
         self.assertEqual(info.get("author"), "thecapitalclub_")
         self.assertEqual(info.get("video_url"), "https://example.com/clean_video.mp4")
         self.assertEqual(len(info.get("formats", [])), 2)  # Video + Audio
+
+
+class TestPlaylistAndAudioEngine(unittest.TestCase):
+    """Test engine playlist and high-quality audio extraction configurations."""
+
+    def test_engine_flac_audio_postprocessor(self):
+        from unittest.mock import patch, MagicMock
+        import yt_dlp
+
+        engine = DownloadEngine()
+        captured_opts = {}
+
+        def mock_ydl_init(opts):
+            nonlocal captured_opts
+            captured_opts = opts
+            mock_inst = MagicMock()
+            mock_inst.download.return_value = 0
+            return mock_inst
+
+        with patch.object(engine, "get_media_info", return_value={"id": "123", "title": "Song", "formats": [{"format_id": "251"}]}):
+            with patch.object(yt_dlp, "YoutubeDL", side_effect=mock_ydl_init):
+                engine.download(
+                    "https://example.com/song",
+                    audio_only=True,
+                    audio_format="flac",
+                    show_progress=False,
+                )
+
+        self.assertIn("postprocessors", captured_opts)
+        pps = captured_opts["postprocessors"]
+        self.assertEqual(len(pps), 1)
+        self.assertEqual(pps[0]["key"], "FFmpegExtractAudio")
+        self.assertEqual(pps[0]["preferredcodec"], "flac")
+        self.assertNotIn("preferredquality", pps[0])
+
+    def test_engine_320k_mp3_postprocessor(self):
+        from unittest.mock import patch, MagicMock
+        import yt_dlp
+
+        engine = DownloadEngine()
+        captured_opts = {}
+
+        def mock_ydl_init(opts):
+            nonlocal captured_opts
+            captured_opts = opts
+            mock_inst = MagicMock()
+            mock_inst.download.return_value = 0
+            return mock_inst
+
+        with patch.object(engine, "get_media_info", return_value={"id": "123", "title": "Song", "formats": [{"format_id": "140"}]}):
+            with patch.object(yt_dlp, "YoutubeDL", side_effect=mock_ydl_init):
+                engine.download(
+                    "https://example.com/song",
+                    audio_only=True,
+                    audio_format="mp3",
+                    audio_quality="320",
+                    show_progress=False,
+                )
+
+        self.assertIn("postprocessors", captured_opts)
+        pps = captured_opts["postprocessors"]
+        self.assertEqual(len(pps), 1)
+        self.assertEqual(pps[0]["key"], "FFmpegExtractAudio")
+        self.assertEqual(pps[0]["preferredcodec"], "mp3")
+        self.assertEqual(pps[0]["preferredquality"], "320")
+
+    def test_engine_playlist_options(self):
+        from unittest.mock import patch, MagicMock
+        import yt_dlp
+
+        engine = DownloadEngine()
+        captured_opts = {}
+
+        def mock_ydl_init(opts):
+            nonlocal captured_opts
+            captured_opts = opts
+            mock_inst = MagicMock()
+            mock_inst.download.return_value = 0
+            return mock_inst
+
+        with patch.object(engine, "get_media_info", return_value={"is_playlist": True, "title": "My Hits", "entries": []}):
+            with patch.object(yt_dlp, "YoutubeDL", side_effect=mock_ydl_init):
+                engine.download(
+                    "https://example.com/playlist",
+                    playlist=True,
+                    playlist_items="1-5",
+                    show_progress=False,
+                )
+
+        self.assertFalse(captured_opts.get("noplaylist"))
+        self.assertEqual(captured_opts.get("playlist_items"), "1-5")
+        self.assertIn("playlist", captured_opts.get("outtmpl", ""))
+
+    def test_display_media_info_playlist(self):
+        from rich.console import Console
+        from simple_downloader.info import display_media_info
+        import io
+
+        test_console = Console(file=io.StringIO())
+        playlist_info = {
+            "is_playlist": True,
+            "title": "Top Hits 2026",
+            "uploader": "Music Channel",
+            "playlist_count": 25,
+            "entries": [{"title": "Track 1"}, {"title": "Track 25"}],
+        }
+        # Verify it executes without raising exception
+        display_media_info(playlist_info, test_console)
 
 
 if __name__ == "__main__":

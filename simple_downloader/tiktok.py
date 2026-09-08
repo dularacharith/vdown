@@ -166,6 +166,7 @@ class TikTokDownloader:
         output_dir: Optional[str] = None,
         audio_only: bool = False,
         audio_format: str = "mp3",
+        audio_quality: str = "320",
         rate_limit: Optional[int] = None,
         show_progress: bool = True,
     ) -> str:
@@ -195,6 +196,44 @@ class TikTokDownloader:
             target_path = dest_dir / Path(target_filename).name
 
             downloader = DirectDownloader(rate_limit=rate_limit)
+
+            # If ffmpeg is available, download to temp and transcode to target format/quality
+            if shutil.which("ffmpeg"):
+                temp_workspace = tempfile.mkdtemp(prefix="vdown_tiktok_audio_")
+                try:
+                    raw_audio_temp = Path(temp_workspace) / "raw_audio"
+                    downloader.download(
+                        url=music_url,
+                        output_path=str(raw_audio_temp),
+                        output_dir=str(temp_workspace),
+                        show_progress=show_progress,
+                    )
+                    cmd = ["ffmpeg", "-y", "-i", str(raw_audio_temp), "-vn"]
+                    if audio_format.lower() == "flac":
+                        cmd += ["-c:a", "flac"]
+                    elif audio_format.lower() == "wav":
+                        cmd += ["-c:a", "pcm_s16le"]
+                    elif audio_format.lower() == "mp3":
+                        q = audio_quality.rstrip("kK") if audio_quality else "320"
+                        cmd += ["-c:a", "libmp3lame", "-b:a", f"{q}k"]
+                    elif audio_format.lower() in ("m4a", "aac"):
+                        q = audio_quality.rstrip("kK") if audio_quality else "320"
+                        cmd += ["-c:a", "aac", "-b:a", f"{q}k"]
+                    elif audio_format.lower() == "opus":
+                        q = audio_quality.rstrip("kK") if audio_quality else "320"
+                        cmd += ["-c:a", "libopus", "-b:a", f"{q}k"]
+                    else:
+                        cmd += ["-c:a", "copy"]
+                    cmd.append(str(target_path))
+                    proc = subprocess.run(cmd, capture_output=True, text=True)
+                    if proc.returncode == 0:
+                        return str(target_path)
+                    # If ffmpeg command failed, fallback to moving downloaded file
+                    shutil.move(str(raw_audio_temp), str(target_path))
+                    return str(target_path)
+                finally:
+                    shutil.rmtree(temp_workspace, ignore_errors=True)
+
             return downloader.download(
                 url=music_url,
                 output_path=str(target_path),

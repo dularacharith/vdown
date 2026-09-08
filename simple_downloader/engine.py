@@ -83,7 +83,14 @@ class DownloadEngine:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 info = ydl.extract_info(url, download=False)
                 if info:
-                    if "entries" in info and not info.get("formats"):
+                    entries = info.get("entries")
+                    if entries is not None:
+                        if not isinstance(entries, list):
+                            entries = list(entries)
+                            info["entries"] = entries
+                        info["is_playlist"] = True
+                        info["playlist_count"] = len(entries)
+                    elif info.get("_type") == "playlist":
                         info["is_playlist"] = True
                     else:
                         info["is_playlist"] = False
@@ -202,6 +209,7 @@ class DownloadEngine:
         format_id: Optional[str] = None,
         audio_only: bool = False,
         audio_format: str = "mp3",
+        audio_quality: str = "320",
         video_format: Optional[str] = None,
         rate_limit: Optional[int] = None,
         subtitles: bool = False,
@@ -243,6 +251,7 @@ class DownloadEngine:
                     output_dir=output_dir,
                     audio_only=audio_only,
                     audio_format=audio_format,
+                    audio_quality=audio_quality,
                     rate_limit=rate_limit,
                     show_progress=show_progress,
                 )
@@ -253,12 +262,61 @@ class DownloadEngine:
         if info and info.get("is_direct"):
             target_download_url = info.get("url") or url
             downloader = DirectDownloader(rate_limit=rate_limit)
-            return downloader.download(
-                url=target_download_url,
-                output_path=output_path,
-                output_dir=output_dir,
-                show_progress=show_progress,
-            )
+            if audio_only:
+                import tempfile
+                import subprocess
+                import shutil
+
+                temp_dir = tempfile.mkdtemp(prefix="vdown_audio_")
+                try:
+                    temp_file = downloader.download(
+                        url=target_download_url,
+                        output_dir=temp_dir,
+                        show_progress=show_progress,
+                    )
+                    dest_dir = Path(output_dir or ".").expanduser().resolve()
+                    dest_dir.mkdir(parents=True, exist_ok=True)
+                    if output_path:
+                        final_name = Path(output_path).name
+                    else:
+                        stem = Path(temp_file).stem
+                        final_name = f"{stem}.{audio_format}"
+                    final_path = dest_dir / final_name
+
+                    if shutil.which("ffmpeg"):
+                        cmd = ["ffmpeg", "-y", "-i", temp_file, "-vn"]
+                        if audio_format.lower() == "flac":
+                            cmd += ["-c:a", "flac"]
+                        elif audio_format.lower() == "wav":
+                            cmd += ["-c:a", "pcm_s16le"]
+                        elif audio_format.lower() == "mp3":
+                            q = audio_quality.rstrip("kK") if audio_quality else "320"
+                            cmd += ["-c:a", "libmp3lame", "-b:a", f"{q}k"]
+                        elif audio_format.lower() in ("m4a", "aac"):
+                            q = audio_quality.rstrip("kK") if audio_quality else "320"
+                            cmd += ["-c:a", "aac", "-b:a", f"{q}k"]
+                        elif audio_format.lower() == "opus":
+                            q = audio_quality.rstrip("kK") if audio_quality else "320"
+                            cmd += ["-c:a", "libopus", "-b:a", f"{q}k"]
+                        else:
+                            cmd += ["-c:a", "copy"]
+                        cmd.append(str(final_path))
+                        proc = subprocess.run(cmd, capture_output=True, text=True)
+                        if proc.returncode == 0:
+                            return str(final_path)
+
+                    # Fallback if ffmpeg is unavailable or failed
+                    shutil.move(temp_file, str(final_path))
+                    return str(final_path)
+                finally:
+                    shutil.rmtree(temp_dir, ignore_errors=True)
+            else:
+                return downloader.download(
+                    url=target_download_url,
+                    output_path=output_path,
+                    output_dir=output_dir,
+                    show_progress=show_progress,
+                )
 
         # 2. Build yt-dlp options
         dest_dir = Path(output_dir or ".").expanduser().resolve()
@@ -272,6 +330,11 @@ class DownloadEngine:
                 out_template = str(dest_dir / p.stem)
             else:
                 out_template = str(dest_dir / p.name)
+        elif playlist:
+            if audio_only:
+                out_template = str(dest_dir / "%(playlist_title,playlist|Playlist)s/%(playlist_index|0)02d - %(title).200B.%(ext)s")
+            else:
+                out_template = str(dest_dir / "%(playlist_title,playlist|Playlist)s/%(playlist_index|0)02d - %(title).200B [%(id)s].%(ext)s")
         else:
             out_template = str(dest_dir / "%(title).200B [%(id)s].%(ext)s")
 
@@ -310,13 +373,14 @@ class DownloadEngine:
             ydl_opts["format"] = format_id
         elif audio_only:
             ydl_opts["format"] = "bestaudio/best"
-            ydl_opts["postprocessors"] = [
-                {
-                    "key": "FFmpegExtractAudio",
-                    "preferredcodec": audio_format,
-                    "preferredquality": "192",
-                }
-            ]
+            preferred_q = audio_quality.rstrip("kK") if audio_quality else "320"
+            pp: Dict[str, Any] = {
+                "key": "FFmpegExtractAudio",
+                "preferredcodec": audio_format,
+            }
+            if audio_format.lower() not in ("flac", "wav"):
+                pp["preferredquality"] = preferred_q
+            ydl_opts["postprocessors"] = [pp]
         else:
             # Video quality logic
             quality_map = {
@@ -358,7 +422,6 @@ class DownloadEngine:
             if "postprocessors" not in ydl_opts:
                 ydl_opts["postprocessors"] = []
             ydl_opts["postprocessors"].append({"key": "EmbedThumbnail"})
-
         # Metadata embedding
         if embed_metadata:
             if "postprocessors" not in ydl_opts:
@@ -367,59 +430,84 @@ class DownloadEngine:
 
         # Rich progress bar setup
         last_file_downloaded = None
+        downloaded_files: List[str] = []
+
+        def ydl_progress_hook(d: Dict[str, Any]):
+            nonlocal last_file_downloaded
+            status = d.get("status")
+
+            if status == "downloading":
+                raw_fn = d.get("filename") or "Media"
+                filename = Path(raw_fn).name
+                total = d.get("total_bytes") or d.get("total_bytes_estimate")
+                downloaded = d.get("downloaded_bytes", 0)
+                speed = d.get("speed")
+                eta = d.get("eta")
+
+                # Show [playlist_index/n_entries] prefix for playlists
+                info_dict = d.get("info_dict") or {}
+                p_idx = info_dict.get("playlist_index")
+                p_count = info_dict.get("n_entries") or info_dict.get("playlist_count")
+                prefix = f"[{p_idx}/{p_count}] " if p_idx and p_count else ""
+                task_label = f"{prefix}{filename}"
+
+                if "task_id" not in task_tracker:
+                    task_tracker["task_id"] = progress.add_task(
+                        task_label,
+                        total=total,
+                        completed=downloaded,
+                        speed=speed,
+                        eta=eta,
+                    )
+                    task_tracker["current_fn"] = filename
+                elif task_tracker.get("current_fn") != filename:
+                    task_tracker["current_fn"] = filename
+                    progress.reset(
+                        task_tracker["task_id"],
+                        description=task_label,
+                        total=total,
+                        completed=downloaded,
+                    )
+                else:
+                    progress.update(
+                        task_tracker["task_id"],
+                        description=task_label,
+                        total=total,
+                        completed=downloaded,
+                        speed=speed,
+                        eta=eta,
+                    )
+
+            elif status == "finished":
+                fn = d.get("filename")
+                if fn:
+                    last_file_downloaded = fn
+                    if fn not in downloaded_files:
+                        downloaded_files.append(fn)
+                if "task_id" in task_tracker:
+                    label = "Extracting Audio..." if audio_only else "Processing / Merging..."
+                    progress.update(
+                        task_tracker["task_id"],
+                        description=label,
+                    )
+
+        def ydl_postprocessor_hook(d: Dict[str, Any]):
+            nonlocal last_file_downloaded
+            if d.get("status") == "finished":
+                filepath = d.get("filepath") or d.get("info_dict", {}).get("filepath")
+                if filepath:
+                    last_file_downloaded = filepath
+                    if filepath not in downloaded_files:
+                        downloaded_files.append(filepath)
+
+        ydl_opts["postprocessor_hooks"] = [ydl_postprocessor_hook]
 
         if show_progress:
             from simple_downloader.progress import create_download_progress
 
             progress = create_download_progress(show_progress=True)
             task_tracker: Dict[str, Any] = {}
-
-            def ydl_progress_hook(d: Dict[str, Any]):
-                nonlocal last_file_downloaded
-                status = d.get("status")
-
-                if status == "downloading":
-                    filename = Path(d.get("filename", "Media")).name
-                    total = d.get("total_bytes") or d.get("total_bytes_estimate")
-                    downloaded = d.get("downloaded_bytes", 0)
-                    speed = d.get("speed")
-                    eta = d.get("eta")
-
-                    if "task_id" not in task_tracker:
-                        task_tracker["task_id"] = progress.add_task(
-                            f"{filename}",
-                            total=total,
-                            completed=downloaded,
-                            speed=speed,
-                            eta=eta,
-                        )
-                    else:
-                        progress.update(
-                            task_tracker["task_id"],
-                            description=f"{filename}",
-                            total=total,
-                            completed=downloaded,
-                            speed=speed,
-                            eta=eta,
-                        )
-
-                elif status == "finished":
-                    last_file_downloaded = d.get("filename")
-                    if "task_id" in task_tracker:
-                        progress.update(
-                            task_tracker["task_id"],
-                            description="Processing / Merging...",
-                        )
-
-            def ydl_postprocessor_hook(d: Dict[str, Any]):
-                nonlocal last_file_downloaded
-                if d.get("status") == "finished":
-                    filepath = d.get("filepath") or d.get("info_dict", {}).get("filepath")
-                    if filepath:
-                        last_file_downloaded = filepath
-
             ydl_opts["progress_hooks"] = [ydl_progress_hook]
-            ydl_opts["postprocessor_hooks"] = [ydl_postprocessor_hook]
 
             try:
                 with progress:
@@ -427,6 +515,11 @@ class DownloadEngine:
                         ret_code = ydl.download([url])
                         if ret_code != 0:
                             raise RuntimeError(f"Download failed with exit code {ret_code}")
+                if playlist and downloaded_files:
+                    if len(downloaded_files) > 1:
+                        common_dir = os.path.dirname(downloaded_files[0])
+                        return common_dir if common_dir and os.path.isdir(common_dir) else last_file_downloaded
+                    return downloaded_files[0]
                 return last_file_downloaded
 
             except Exception as e:
@@ -474,4 +567,9 @@ class DownloadEngine:
         else:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
+            if playlist and downloaded_files:
+                if len(downloaded_files) > 1:
+                    common_dir = os.path.dirname(downloaded_files[0])
+                    return common_dir if common_dir and os.path.isdir(common_dir) else last_file_downloaded
+                return downloaded_files[0]
             return last_file_downloaded
