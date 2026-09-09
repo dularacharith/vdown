@@ -291,7 +291,7 @@ class RoopaHalaExtractor(BaseSeriesExtractor):
         # 1. Show Title
         title = "Roopa Hala Content"
         title_matches = [
-            re.search(r'<h[1-4][^>]*class=["\'][^"\']*(?:movie-name|film-name|movie-title|film-title|title)[^"\']*["\'][^>]*>(.*?)</h[1-4]>', html, re.I | re.DOTALL),
+            re.search(r'<h[1-4][^>]*class=["\'][^"\']*(?:trending-text|big-title|movie-name|film-name|movie-title|film-title|title)[^"\']*["\'][^>]*>(.*?)</h[1-4]>', html, re.I | re.DOTALL),
             re.search(r'<meta\s+property=["\']og:title["\']\s+content=["\']([^"\']+)["\']', html, re.I),
             re.search(r'<h1[^>]*class=["\'][^"\']*(?:movie-title|film-title|title)[^"\']*["\'][^>]*>(.*?)</h1>', html, re.I | re.DOTALL),
             re.search(r'<h1[^>]*>(.*?)</h1>', html, re.I | re.DOTALL),
@@ -341,55 +341,99 @@ class RoopaHalaExtractor(BaseSeriesExtractor):
 
         # 5. Extract episodes & seasons
         seasons_dict: Dict[int, List[Episode]] = {}
-
-        # Scan for episode cards / items
-        # Pattern e.g. <a href="...episode/X" ...> or data-ep="..." or data-season="..."
-        episode_blocks = re.findall(
-            r'<(?:div|li|a)[^>]*(?:class|id)=["\'][^"\']*(?:episode|ep-item|film-detail)[^"\']*["\'][^>]*>(.*?)</(?:div|li|a)>',
-            html,
-            re.DOTALL | re.I,
-        )
-
         ep_idx = 1
         found_episodes = False
 
-        if episode_blocks:
-            for block in episode_blocks:
-                # Find season & episode number
-                s_m = re.search(r'(?:season|s)[\s._-]*(\d+)', block, re.I)
-                e_m = re.search(r'(?:episode|ep)[\s._-]*(\d+)', block, re.I)
+        # Pattern A: Roopa Hala slide-item cards (favorites-slider-movie / slide-item)
+        slide_items = re.findall(
+            r'<li[^>]*class=["\'][^"\']*slide-item[^"\']*["\'][^>]*>(.*?)</li>',
+            html,
+            re.DOTALL | re.I,
+        )
+        if not slide_items:
+            slide_items = re.findall(
+                r'<div[^>]*class=["\'][^"\']*card[^"\']*["\'][^>]*onclick=["\'][^"\']*playForm-\d+[^"\']*["\'][^>]*>(.*?)</div>\s*</div>',
+                html,
+                re.DOTALL | re.I,
+            )
+
+        if slide_items:
+            for item in slide_items:
+                cid_m = re.search(r'playForm-(\d+)', item) or re.search(r'data-id=["\'](\d+)["\']', item)
+                cid = cid_m.group(1) if cid_m else None
+
+                t_m = re.search(r'<h\d[^>]*>(.*?)</h\d>', item, re.DOTALL | re.I)
+                raw_title = re.sub(r"<[^>]+>", "", t_m.group(1)).strip() if t_m else f"Episode {ep_idx}"
+
+                img_m = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', item)
+                thumb = urllib.parse.urljoin(url, img_m.group(1).strip()) if img_m else poster_url
+
+                s_m = re.search(r'(?:season|s)[\s._-]*(\d+)', raw_title, re.I)
+                e_m = re.search(r'(?:episose|episode|ep)[\s._-]*(\d+)', raw_title, re.I)
+
                 season_no = int(s_m.group(1)) if s_m else 1
                 episode_no = int(e_m.group(1)) if e_m else ep_idx
 
-                # Title
-                ep_title_m = re.search(r'<h\d[^>]*>(.*?)</h\d>', block, re.DOTALL | re.I)
-                ep_title = (
-                    re.sub(r"<[^>]+>", "", ep_title_m.group(1)).strip()
-                    if ep_title_m
-                    else f"Episode {episode_no}"
-                )
+                clean_title = re.sub(r'^(?:.*?)(?:season\s*\d+\s*)?(?:episose|episode|ep)\s*\d+[\s:._-]*', '', raw_title, flags=re.I).strip()
+                if not clean_title:
+                    clean_title = f"Episode {episode_no}"
 
-                # Link / URL
-                href_m = re.search(r'href=["\']([^"\']+)["\']', block)
-                ep_url = urllib.parse.urljoin(url, href_m.group(1)) if href_m else url
-
-                # Thumbnail
-                thumb_m = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', block)
-                ep_thumb = urllib.parse.urljoin(url, thumb_m.group(1)) if thumb_m else poster_url
+                ep_url = f"https://www.roopahala.com.au/new/content/{cid}/movie" if cid else url
 
                 ep = Episode(
                     show_title=title,
                     season_number=season_no,
                     episode_number=episode_no,
-                    title=ep_title,
+                    title=clean_title,
                     url=ep_url,
-                    thumbnail=ep_thumb,
+                    thumbnail=thumb,
                     stream_url=direct_stream_url,
                     headers={"Referer": "https://roopahala.com.au/"},
                 )
                 seasons_dict.setdefault(season_no, []).append(ep)
                 ep_idx += 1
                 found_episodes = True
+
+        # Pattern B: Generic episode blocks / items
+        if not found_episodes:
+            episode_blocks = re.findall(
+                r'<(?:div|li|a)[^>]*(?:class|id)=["\'][^"\']*(?:episode|ep-item|film-detail)[^"\']*["\'][^>]*>(.*?)</(?:div|li|a)>',
+                html,
+                re.DOTALL | re.I,
+            )
+            if episode_blocks:
+                for block in episode_blocks:
+                    s_m = re.search(r'(?:season|s)[\s._-]*(\d+)', block, re.I)
+                    e_m = re.search(r'(?:episose|episode|ep)[\s._-]*(\d+)', block, re.I)
+                    season_no = int(s_m.group(1)) if s_m else 1
+                    episode_no = int(e_m.group(1)) if e_m else ep_idx
+
+                    ep_title_m = re.search(r'<h\d[^>]*>(.*?)</h\d>', block, re.DOTALL | re.I)
+                    ep_title = (
+                        re.sub(r"<[^>]+>", "", ep_title_m.group(1)).strip()
+                        if ep_title_m
+                        else f"Episode {episode_no}"
+                    )
+
+                    href_m = re.search(r'href=["\']([^"\']+)["\']', block)
+                    ep_url = urllib.parse.urljoin(url, href_m.group(1)) if href_m else url
+
+                    thumb_m = re.search(r'<img[^>]+src=["\']([^"\']+)["\']', block)
+                    ep_thumb = urllib.parse.urljoin(url, thumb_m.group(1)) if thumb_m else poster_url
+
+                    ep = Episode(
+                        show_title=title,
+                        season_number=season_no,
+                        episode_number=episode_no,
+                        title=ep_title,
+                        url=ep_url,
+                        thumbnail=ep_thumb,
+                        stream_url=direct_stream_url,
+                        headers={"Referer": "https://roopahala.com.au/"},
+                    )
+                    seasons_dict.setdefault(season_no, []).append(ep)
+                    ep_idx += 1
+                    found_episodes = True
 
         # If no multi-episode markup found, check for embedded JSON / playlist
         if not found_episodes:
@@ -1327,6 +1371,27 @@ class EpisodeStreamPlayer:
             except Exception:
                 stream_url = None
                 headers = {}
+
+        if not stream_url and "roopahala" in self.series.url.lower():
+            self.console.print(
+                Panel(
+                    f"[bold yellow]🔒 Roopa Hala Subscription / Login Required[/bold yellow]\n\n"
+                    f"[bold cyan]Show:[/bold cyan] {self.series.title}\n"
+                    f"[bold cyan]Episode:[/bold cyan] {self.episode.formatted_title()}\n"
+                    f"[dim]Episode Page:[/dim] {self.episode.url}\n\n"
+                    f"This series or episode is protected and requires an authenticated Roopa Hala session.\n\n"
+                    f"💡 [bold white]How to watch this series in CLI:[/bold white]\n"
+                    f"  1. Sign in to your Roopa Hala account in your browser (Chrome, Brave, Firefox, Chromium, etc.).\n"
+                    f"  2. Re-run vdown passing your browser cookies:\n"
+                    f"     [bold green]vdown \"{self.series.url}\" --play --browser chrome[/bold green]\n"
+                    f"     [dim](Supported browsers: chrome, brave, firefox, edge, chromium, opera)[/dim]\n"
+                    f"  3. Or pass a cookie file:\n"
+                    f"     [bold green]vdown \"{self.series.url}\" --play --cookies cookies.txt[/bold green]",
+                    title="📺 Roopa Hala Protected Stream",
+                    border_style="yellow",
+                )
+            )
+            return 1
 
         target_url = stream_url or self.episode.stream_url or self.episode.url
         if not target_url:

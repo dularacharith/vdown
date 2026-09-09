@@ -2000,6 +2000,60 @@ class TestSeriesAndShowDownloader(unittest.TestCase):
             self.assertEqual(stream_url, raw_stream)
             self.assertEqual(headers.get("Referer"), "https://roopahala.com.au/")
 
+    def test_roopahala_series_content_link(self):
+        import requests
+        from simple_downloader.series import RoopaHalaExtractor
+        from unittest.mock import patch, MagicMock
+
+        mock_html = """
+        <html>
+        <head>
+            <title>Welcome to Roopa Hala</title>
+            <meta name="csrf-token" content="test-token" />
+        </head>
+        <body>
+            <div class="trending-info season-info">
+                <h4 class="trending-text big-title">Kama Ray Season 1</h4>
+            </div>
+            <ul class="favorites-slider-movie">
+                <li class="slide-item">
+                    <div class="card" onclick="document.getElementById('playForm-14311').submit()">
+                        <img src="https://content.roopahala.com.au/uploads/thumbnail/2026/03/Kama_Ray_E01.jpg">
+                        <div class="info">
+                            <h1>Kama Ray Season 01 Episose 01</h1>
+                            <p>Episode 1 • Drama</p>
+                        </div>
+                    </div>
+                </li>
+                <li class="slide-item">
+                    <div class="card" onclick="document.getElementById('playForm-14312').submit()">
+                        <img src="https://content.roopahala.com.au/uploads/thumbnail/2026/03/Kama_Ray_E02.jpg">
+                        <div class="info">
+                            <h1>Kama Ray Season 01 Episose 02</h1>
+                            <p>Episode 2 • Drama</p>
+                        </div>
+                    </div>
+                </li>
+            </ul>
+        </body>
+        </html>
+        """
+
+        mock_resp = MagicMock()
+        mock_resp.text = mock_html
+        mock_resp.status_code = 200
+
+        extractor = RoopaHalaExtractor()
+        with patch.object(requests.Session, "get", return_value=mock_resp):
+            series = extractor.extract_series("https://www.roopahala.com.au/content/125/0f23a910-9f2c-41f3-a11f-9bf8be82f1a5")
+            self.assertEqual(series.title, "Kama Ray Season 1")
+            self.assertEqual(series.platform_name, "Roopa Hala")
+            self.assertEqual(series.total_episodes, 2)
+            self.assertEqual(series.all_episodes[0].formatted_title(), "S01E01")
+            self.assertEqual(series.all_episodes[0].url, "https://www.roopahala.com.au/new/content/14311/movie")
+            self.assertEqual(series.all_episodes[1].formatted_title(), "S01E02")
+            self.assertEqual(series.all_episodes[1].url, "https://www.roopahala.com.au/new/content/14312/movie")
+
     def test_netflix_extractor(self):
         import requests
         from simple_downloader.series import NetflixExtractor
