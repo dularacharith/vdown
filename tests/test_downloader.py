@@ -812,5 +812,152 @@ class TestSpotifyDownloader(unittest.TestCase):
             self.assertGreater(len(b64_pic), 50)
 
 
+class TestTurboAndTorrentDownloader(unittest.TestCase):
+    """Unit tests for IDM-style Turbo multi-connection and BitTorrent modules."""
+
+    def test_turbo_chunk_calculation(self):
+        from simple_downloader.turbo import TurboDownloader
+
+        # 100 bytes across 4 connections
+        chunks = TurboDownloader.calculate_chunks(100, 4)
+        self.assertEqual(len(chunks), 4)
+        self.assertEqual(chunks[0], (0, 24))
+        self.assertEqual(chunks[1], (25, 49))
+        self.assertEqual(chunks[2], (50, 74))
+        self.assertEqual(chunks[3], (75, 99))
+
+        # 1 connection
+        single_chunk = TurboDownloader.calculate_chunks(100, 1)
+        self.assertEqual(single_chunk, [(0, 99)])
+
+    def test_turbo_download_mock_server(self):
+        from simple_downloader.turbo import TurboDownloader
+        from http.server import HTTPServer, BaseHTTPRequestHandler
+        import threading
+        import tempfile
+        import hashlib
+
+        # Create 1 MB of test data
+        test_payload = (b"0123456789abcdef" * 65536)  # 1,048,576 bytes
+        expected_md5 = hashlib.md5(test_payload).hexdigest()
+
+        class RangeHandler(BaseHTTPRequestHandler):
+            def log_message(self, format, *args):
+                pass
+
+            def do_HEAD(self):
+                self.send_response(200)
+                self.send_header("Content-Type", "application/octet-stream")
+                self.send_header("Content-Length", str(len(test_payload)))
+                self.send_header("Accept-Ranges", "bytes")
+                self.end_headers()
+
+            def do_GET(self):
+                range_header = self.headers.get("Range")
+                if range_header and range_header.startswith("bytes="):
+                    rng = range_header.replace("bytes=", "").split("-")
+                    start = int(rng[0])
+                    end = int(rng[1]) if rng[1] else len(test_payload) - 1
+                    end = min(end, len(test_payload) - 1)
+                    body = test_payload[start : end + 1]
+
+                    self.send_response(206)
+                    self.send_header("Content-Type", "application/octet-stream")
+                    self.send_header("Content-Range", f"bytes {start}-{end}/{len(test_payload)}")
+                    self.send_header("Content-Length", str(len(body)))
+                    self.end_headers()
+                    self.wfile.write(body)
+                else:
+                    self.send_response(200)
+                    self.send_header("Content-Type", "application/octet-stream")
+                    self.send_header("Content-Length", str(len(test_payload)))
+                    self.send_header("Accept-Ranges", "bytes")
+                    self.end_headers()
+                    self.wfile.write(test_payload)
+
+        server = HTTPServer(("127.0.0.1", 0), RangeHandler)
+        port = server.server_port
+        t = threading.Thread(target=server.serve_forever, daemon=True)
+        t.start()
+
+        try:
+            with tempfile.TemporaryDirectory() as td:
+                out_file = os.path.join(td, "downloaded.bin")
+                turbo = TurboDownloader(connections=4)
+                res = turbo.download(
+                    f"http://127.0.0.1:{port}/test.bin",
+                    output_path=out_file,
+                    connections=4,
+                    show_progress=False,
+                )
+                self.assertTrue(os.path.exists(res))
+                with open(res, "rb") as f:
+                    downloaded_bytes = f.read()
+                self.assertEqual(len(downloaded_bytes), len(test_payload))
+                self.assertEqual(hashlib.md5(downloaded_bytes).hexdigest(), expected_md5)
+        finally:
+            server.shutdown()
+            server.server_close()
+
+    def test_is_torrent_or_magnet(self):
+        from simple_downloader.torrent import is_torrent_or_magnet
+
+        self.assertTrue(is_torrent_or_magnet("magnet:?xt=urn:btih:3b5f903820fae4123"))
+        self.assertTrue(is_torrent_or_magnet("https://example.com/archlinux.torrent"))
+        self.assertTrue(is_torrent_or_magnet("debian-12.torrent"))
+        self.assertFalse(is_torrent_or_magnet("https://www.youtube.com/watch?v=dQw4w9WgXcQ"))
+        self.assertFalse(is_torrent_or_magnet("https://open.spotify.com/track/123"))
+
+    def test_parse_magnet_link(self):
+        from simple_downloader.torrent import parse_magnet_link
+
+        mag = "magnet:?xt=urn:btih:3b5f903820fae4123&dn=Ubuntu-24.04-Desktop.iso&tr=http%3A%2F%2Ftracker.example.com%2Fannounce"
+        parsed = parse_magnet_link(mag)
+        self.assertEqual(parsed["name"], "Ubuntu-24.04-Desktop.iso")
+        self.assertEqual(parsed["info_hash"], "3b5f903820fae4123")
+        self.assertEqual(len(parsed["trackers"]), 1)
+
+    def test_bencode_decoder(self):
+        from simple_downloader.torrent import decode_bencode
+
+        # Integer
+        val, end = decode_bencode(b"i42e")
+        self.assertEqual(val, 42)
+
+        # String
+        val, end = decode_bencode(b"4:spam")
+        self.assertEqual(val, b"spam")
+
+        # List
+        val, end = decode_bencode(b"l4:spami42ee")
+        self.assertEqual(val, [b"spam", 42])
+
+        # Dictionary
+        val, end = decode_bencode(b"d3:cow3:moo4:spami10ee")
+        self.assertEqual(val, {"cow": b"moo", "spam": 10})
+
+    def test_cli_turbo_and_torrent_args(self):
+        from simple_downloader.cli import create_parser
+
+        parser = create_parser()
+        args = parser.parse_args(["https://example.com/file.zip", "--turbo", "-c", "8"])
+        self.assertTrue(args.turbo)
+        self.assertEqual(args.connections, 8)
+
+        args_torrent = parser.parse_args(["magnet:?xt=urn:btih:123", "--torrent"])
+        self.assertTrue(args_torrent.torrent)
+
+    def test_welcome_screen_and_diagnostics(self):
+        from simple_downloader.cli import display_welcome_screen, ASCII_BANNER
+        from unittest.mock import patch
+
+        self.assertGreater(len(ASCII_BANNER), 50)
+        self.assertIn("bright_cyan", ASCII_BANNER)
+
+        # Ensure display_welcome_screen runs without crashing
+        with patch("rich.console.Console.print"):
+            display_welcome_screen()
+
+
 if __name__ == "__main__":
     unittest.main()

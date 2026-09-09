@@ -4,6 +4,9 @@ A fast, versatile command-line video and media downloader. Download videos, audi
 
 ## Features
 
+- **Interactive ASCII Art Hub**: Launch `vdown` to access a guided welcome screen with rich system diagnostics, tool statuses, and top-level menu selection.
+- **IDM-Style Turbo Accelerator**: Parallel segmented multi-connection engine (4–32 concurrent streams via HTTP byte ranges) to bypass ISP and server bandwidth throttling on direct links.
+- **BitTorrent & Magnet P2P Downloads**: High-speed peer-to-peer downloading for magnet links and `.torrent` files with DHT, peer swarm integration, and pure Python metadata inspection.
 - **Universal Link Support**: Downloads from YouTube, Facebook, Instagram, TikTok (without watermark), Spotify, Twitter/X, Vimeo, Reddit, Twitch, and 1800+ other platforms.
 - **Spotify Tracks & Playlists**: Download Spotify tracks, playlists, and albums in **FLAC Lossless**, **WAV PCM**, or **320 kbps MP3** with embedded tags and high-resolution album cover art.
 - **YouTube Playlists**: Downloads complete playlists or specific track ranges into organized folders with track numbers (`01 - Title.mp4`).
@@ -21,17 +24,19 @@ A fast, versatile command-line video and media downloader. Download videos, audi
 
 - **Python**: 3.10 or higher
 - **FFmpeg**: Required for audio/video merging and format conversion
+- **aria2** *(optional)*: Recommended for BitTorrent & Magnet P2P swarm downloads
 
 ```bash
 # Windows (via winget)
 winget install Python.Python.3.12
 winget install Gyan.FFmpeg
+winget install Gyan.Breeze.aria2
 
 # Arch Linux
-sudo pacman -S ffmpeg python
+sudo pacman -S ffmpeg python aria2
 
 # Ubuntu / Debian
-sudo apt install ffmpeg python3 python3-venv
+sudo apt install ffmpeg python3 python3-venv aria2
 ```
 
 ---
@@ -58,15 +63,42 @@ After running `install.bat`, you can run `.\vdown.bat` directly or add `.venv\Sc
 
 ## Usage
 
-### 1. Interactive Mode
-Run `vdown` without arguments for a guided wizard:
+### 1. Interactive Mode & ASCII Art Hub
+Run `vdown` without arguments for the interactive welcome hub and menu:
 ```bash
 vdown
 ```
-- For playlists: prompts whether to download the entire playlist or a specific range (`1-10`).
-- For audio: lets you pick between MP3 (with selectable bitrate: 320k, 256k, 192k, 128k), Lossless FLAC, M4A, WAV, or OPUS.
+Displays a stylized ASCII art banner, system diagnostics (FFmpeg, aria2c, storage space), and interactive options:
+- `[1] 🚀 Turbo Download`: Multi-connection accelerated download for direct files (IDM-style)
+- `[2] 🧲 Torrent & Magnet`: Unthrottled peer-to-peer BitTorrent swarm downloader
+- `[3] 🎬 Video & Stream`: YouTube (playlists & singles), TikTok, Instagram, Facebook, and arbitrary sites
+- `[4] 🎵 Music & Audio`: Spotify tracks/playlists, lossless FLAC, 320k MP3, and WAV with cover art
+- `[5] 📁 Batch Download`: Download URLs line-by-line from a text file
+- `[6] ℹ️ Media Inspector`: Inspect streams and formats without downloading
+- `[7] ⚙️ System Diagnostics`: Real-time tool statuses and storage inspection
+- `[8] 🚪 Exit`: Clean goodbye
 
-### 2. Download YouTube Playlists
+### 2. IDM-Style Turbo Accelerator (Multi-Connection)
+Accelerate direct file downloads by splitting them into concurrent byte-range segments to bypass single-thread ISP/server bandwidth throttling:
+```bash
+# Download direct file using 16 parallel connections (default)
+vdown "https://example.com/largefile.zip" --turbo
+
+# Download direct file with 32 concurrent connections
+vdown "https://example.com/largefile.zip" --turbo -c 32
+```
+
+### 3. BitTorrent & Magnet Downloads (P2P High-Speed)
+Download torrents and magnet links with full peer-to-peer swarm speed:
+```bash
+# Download from magnet link
+vdown "magnet:?xt=urn:btih:3b5f903820fae4123&dn=Ubuntu.iso..."
+
+# Download from a .torrent file
+vdown "Ubuntu-24.04-Desktop.torrent"
+```
+
+### 4. Download YouTube Playlists
 ```bash
 # Download entire playlist into an organized folder
 vdown "https://www.youtube.com/playlist?list=PL..."
@@ -78,7 +110,7 @@ vdown "https://www.youtube.com/playlist?list=PL..." --playlist-items 1-10
 vdown "https://www.youtube.com/watch?v=...&list=..." --no-playlist
 ```
 
-### 3. Extract Audio (Lossless FLAC & 320 kbps MP3)
+### 5. Extract Audio (Lossless FLAC & 320 kbps MP3)
 ```bash
 # Extract 320 kbps MP3 (default audio bitrate is 320 kbps)
 vdown "https://www.youtube.com/watch?v=..." -a
@@ -93,7 +125,7 @@ vdown "https://www.youtube.com/playlist?list=PL..." -a --audio-format flac
 vdown "https://www.youtube.com/watch?v=..." -a -aq 256
 ```
 
-### 4. Spotify Tracks, Playlists & Albums (FLAC, WAV, 320k MP3)
+### 6. Spotify Tracks, Playlists & Albums (FLAC, WAV, 320k MP3)
 All audio downloads include high-resolution embedded album splash art across **all formats** (WAV, FLAC, MP3, M4A, OPUS), plus a folder `cover.jpg` for playlists.
 
 ```bash
@@ -113,12 +145,12 @@ vdown "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M"
 vdown "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M" --playlist-items 1-5 --audio-format flac
 ```
 
-### 5. Choose Video Resolution (e.g. 4K, 1080p, or 720p)
+### 7. Choose Video Resolution (e.g. 4K, 1080p, or 720p)
 ```bash
 vdown "https://www.youtube.com/watch?v=..." -q 1080p
 ```
 
-### 6. TikTok (No Watermark & Photo Slideshows)
+### 8. TikTok (No Watermark & Photo Slideshows)
 ```bash
 vdown "https://vt.tiktok.com/ZSqF9Tr6a/"
 
@@ -126,23 +158,23 @@ vdown "https://vt.tiktok.com/ZSqF9Tr6a/"
 vdown "https://vt.tiktok.com/ZSqF9Tr6a/" -a --audio-format flac
 ```
 
-### 7. Instagram & Facebook (With Browser Session)
+### 9. Instagram & Facebook (With Browser Session)
 ```bash
 vdown "https://www.instagram.com/reel/.../" --browser chromium
 vdown "https://www.facebook.com/reel/..." --browser chromium
 ```
 
-### 8. Inspect Link Details & Available Formats
+### 10. Inspect Link Details & Available Formats
 ```bash
 vdown "https://..." --info
 ```
 
-### 9. Custom Output Directory & File Name
+### 11. Custom Output Directory & File Name
 ```bash
 vdown "https://..." -o "video.mp4" -d ~/Downloads
 ```
 
-### 10. Batch Download
+### 12. Batch Download
 ```bash
 vdown -b links.txt -d ~/Downloads
 ```
@@ -153,8 +185,11 @@ vdown -b links.txt -d ~/Downloads
 
 | Option | Description | Default |
 | :--- | :--- | :--- |
-| `url` | Video or playlist URL to download | None |
-| `-i`, `--interactive` | Launch interactive wizard | Disabled |
+| `url` | Video, playlist, file URL, or magnet link to download | None |
+| `-i`, `--interactive` | Launch interactive welcome hub & menu | Disabled |
+| `--turbo` | Enable IDM-style multi-connection parallel segmented downloading | Disabled |
+| `-c`, `--connections` | Number of concurrent streams for turbo/torrent downloading | `16` |
+| `--torrent` | Download as BitTorrent / Magnet link | Auto |
 | `--info` | Inspect media metadata and formats without downloading | Disabled |
 | `-q`, `--quality` | Video quality (`best`, `4k`, `1440p`, `1080p`, `720p`, `480p`, `worst`) | `best` |
 | `-f`, `--format-id` | Specific stream format code | Auto |

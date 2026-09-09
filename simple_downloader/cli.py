@@ -2,18 +2,23 @@
 
 import argparse
 import os
+import platform
+import shutil
 import sys
 from pathlib import Path
 from typing import Optional, List
 from rich.console import Console
 from rich.prompt import Prompt, Confirm
 from rich.panel import Panel
+from rich.table import Table
 from rich.text import Text
 
 from simple_downloader import __version__
 from simple_downloader.engine import DownloadEngine
 from simple_downloader.info import display_media_info, display_formats_table
 from simple_downloader.utils import parse_speed_limit, format_bytes
+from simple_downloader.turbo import TurboDownloader
+from simple_downloader.torrent import TorrentDownloader, is_torrent_or_magnet
 
 console = Console()
 
@@ -183,6 +188,25 @@ def create_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument(
+        "--turbo",
+        action="store_true",
+        help="Enable IDM-style multi-connection parallel segmented downloading",
+    )
+
+    parser.add_argument(
+        "-c", "--connections",
+        type=int,
+        default=16,
+        help="Number of concurrent connections for turbo/torrent downloading (default: 16)",
+    )
+
+    parser.add_argument(
+        "--torrent",
+        action="store_true",
+        help="Download as BitTorrent / Magnet link using P2P engine",
+    )
+
+    parser.add_argument(
         "-v", "--version",
         action="version",
         version=f"vdown {__version__}",
@@ -200,29 +224,175 @@ def run_interactive_mode(engine: DownloadEngine, initial_url: Optional[str] = No
         return 130
 
 
-def _run_interactive_mode_impl(engine: DownloadEngine, initial_url: Optional[str] = None) -> int:
-    """Implementation of interactive download wizard."""
+ASCII_BANNER = r"""[bold bright_cyan]
+ ██╗   ██╗██████╗  ██████╗ ██╗    ██╗███╗   ██╗
+ ██║   ██║██╔══██╗██╔═══██╗██║    ██║████╗  ██║
+ ██║   ██║██║  ██║██║   ██║██║ █╗ ██║██╔██╗ ██║
+ ╚██╗ ██╔╝██║  ██║██║   ██║██║███╗██║██║╚██╗██║
+  ╚████╔╝ ██████╔╝╚██████╔╝╚███╔███╔╝██║ ╚████║
+   ╚═══╝  ╚═════╝  ╚═════╝  ╚══╝╚══╝ ╚═╝  ╚═══╝[/bold bright_cyan]"""
+
+
+def display_welcome_screen():
+    """Display ASCII banner and brief intro overview."""
+    console.print(ASCII_BANNER)
+    intro_markup = (
+        f"[bold white]vdown v{__version__}[/bold white] — [dim]All-in-One CLI Media & High-Speed File Downloader[/dim]\n\n"
+        f"• [bold cyan]🚀 Turbo Multi-Stream:[/bold cyan] IDM-style parallel segmented downloading to bypass bandwidth throttle\n"
+        f"• [bold magenta]🧲 P2P Torrents & Magnets:[/bold magenta] Unthrottled BitTorrent peer-to-peer swarms\n"
+        f"• [bold blue]🎬 Video & Streams:[/bold blue] YouTube (playlists & singles), TikTok (watermark-free), Instagram, Facebook\n"
+        f"• [bold green]🎵 Studio Audio Quality:[/bold green] FLAC Lossless, 320 kbps MP3, WAV with embedded splash art\n"
+        f"• [dim]Default Output Folder: [underline]{os.path.abspath('downloads')}[/underline][/dim]"
+    )
     console.print(
         Panel(
-            Text(
-                f"🎬 Simple Downloader v{__version__}\n"
-                "Universal CLI Video & Media Downloader\n"
-                "Supports YouTube, Facebook, Instagram, TikTok, X/Twitter, and Any Link",
-                justify="center",
-                style="bold bright_cyan",
-            ),
+            intro_markup,
+            title="[bold yellow]⚡ Welcome to vdown[/bold yellow]",
             border_style="bright_blue",
         )
     )
 
-    url = initial_url
-    if not url:
-        url = Prompt.ask("\n[bold yellow]Paste the video or media link[/bold yellow]")
-        url = url.strip().strip("'\"")
 
-    if not url:
-        console.print("[red]No URL provided. Exiting.[/red]")
-        return 1
+def display_system_diagnostics():
+    """Display diagnostics of installed tools, storage, and system environment."""
+    table = Table(title="⚙️ System Diagnostics & Tool Status", show_header=True)
+    table.add_column("Component", style="bold cyan")
+    table.add_column("Status", style="bold")
+    table.add_column("Details", style="dim")
+
+    # FFmpeg
+    ffmpeg_path = shutil.which("ffmpeg")
+    if ffmpeg_path:
+        table.add_row("FFmpeg", "[green]Installed[/green]", ffmpeg_path)
+    else:
+        table.add_row("FFmpeg", "[red]Missing[/red]", "Required for audio conversion & merging")
+
+    # aria2c
+    aria2_path = shutil.which("aria2c")
+    if aria2_path:
+        table.add_row("aria2c (P2P Engine)", "[green]Installed[/green]", aria2_path)
+    else:
+        table.add_row("aria2c (P2P Engine)", "[yellow]Not Installed[/yellow]", "Install for BitTorrent P2P downloads")
+
+    # Python & OS
+    table.add_row("Python", f"[green]{platform.python_version()}[/green]", sys.executable)
+    table.add_row("Platform", f"[cyan]{platform.system()} {platform.release()}[/cyan]", platform.machine())
+
+    # Download directory & storage
+    down_dir = Path("downloads").resolve()
+    down_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        usage = shutil.disk_usage(down_dir)
+        free_space = format_bytes(usage.free)
+        total_space = format_bytes(usage.total)
+        table.add_row("Storage", f"[green]{free_space} Free[/green]", f"of {total_space} total ({down_dir})")
+    except Exception:
+        table.add_row("Storage", "[cyan]Available[/cyan]", str(down_dir))
+
+    console.print(table)
+    Prompt.ask("\n[dim]Press Enter to return to main menu...[/dim]", default="")
+
+
+def _run_interactive_mode_impl(engine: DownloadEngine, initial_url: Optional[str] = None) -> int:
+    """Implementation of interactive download wizard."""
+    if initial_url:
+        target = initial_url.strip().strip("'\"")
+        if is_torrent_or_magnet(target):
+            torrent_dl = TorrentDownloader(console)
+            return torrent_dl.download(target)
+        return _run_media_wizard(engine, target)
+
+    display_welcome_screen()
+
+    while True:
+        console.print("\n[bold yellow]What would you like to download?[/bold yellow]")
+        console.print("  [1] 🚀 [bold cyan]Turbo Download[/bold cyan] (IDM-style Multi-Connection File Accelerator)")
+        console.print("  [2] 🧲 [bold magenta]Torrent & Magnet[/bold magenta] (P2P High-Speed Swarm Downloader)")
+        console.print("  [3] 🎬 [bold blue]Video & Stream[/bold blue] (YouTube, TikTok, Reels, Facebook, Web)")
+        console.print("  [4] 🎵 [bold green]Music & Audio[/bold green] (Spotify, FLAC Lossless, 320k MP3, WAV)")
+        console.print("  [5] 📁 [bold white]Batch Download[/bold white] (Download links from a text file)")
+        console.print("  [6] ℹ️ [bold yellow]Media Inspector[/bold yellow] (Inspect link formats and quality)")
+        console.print("  [7] ⚙️ [bold dim]System Diagnostics[/bold dim] (Check FFmpeg, aria2c, disk space)")
+        console.print("  [8] 🚪 [bold red]Exit[/bold red]")
+
+        choice = Prompt.ask("Select an option", choices=["1", "2", "3", "4", "5", "6", "7", "8"], default="1")
+
+        if choice == "8":
+            console.print("\n[bold yellow]👋 Goodbye![/bold yellow]")
+            return 0
+
+        elif choice == "1":
+            link = Prompt.ask("\n[bold yellow]Paste direct download link (e.g. zip, iso, mp4, tar, installer)[/bold yellow]")
+            link = link.strip().strip("'\"")
+            if not link:
+                continue
+            conn_str = Prompt.ask("Parallel connections (IDM threads: 4-32)", default="16")
+            try:
+                conns = int(conn_str)
+            except ValueError:
+                conns = 16
+            out_dir = Prompt.ask("Destination directory", default="downloads")
+            turbo = TurboDownloader(connections=conns)
+            try:
+                turbo.download(link, output_dir=out_dir, connections=conns, console=console)
+            except Exception as e:
+                console.print(f"[bold red]Download error:[/bold red] {e}")
+            return 0
+
+        elif choice == "2":
+            target = Prompt.ask("\n[bold yellow]Paste magnet link (magnet:?...) or path to .torrent file[/bold yellow]")
+            target = target.strip().strip("'\"")
+            if not target:
+                continue
+            out_dir = Prompt.ask("Destination directory", default="downloads")
+            torrent_dl = TorrentDownloader(console)
+            return torrent_dl.download(target, output_dir=out_dir)
+
+        elif choice == "3":
+            url = Prompt.ask("\n[bold yellow]Paste video or stream link (YouTube, TikTok, IG, FB, Web)[/bold yellow]")
+            url = url.strip().strip("'\"")
+            if not url:
+                continue
+            return _run_media_wizard(engine, url, force_audio=False)
+
+        elif choice == "4":
+            url = Prompt.ask("\n[bold yellow]Paste song, album, playlist or video link (Spotify, YouTube, etc.)[/bold yellow]")
+            url = url.strip().strip("'\"")
+            if not url:
+                continue
+            return _run_media_wizard(engine, url, force_audio=True)
+
+        elif choice == "5":
+            batch_path = Prompt.ask("\n[bold yellow]Enter path to text file containing URLs[/bold yellow]", default="links.txt")
+            batch_path = batch_path.strip().strip("'\"")
+            if not batch_path:
+                continue
+            parser = create_parser()
+            args = parser.parse_args(["-b", batch_path])
+            return process_batch_file(batch_path, engine, args)
+
+        elif choice == "6":
+            url = Prompt.ask("\n[bold yellow]Paste media link to inspect[/bold yellow]")
+            url = url.strip().strip("'\"")
+            if not url:
+                continue
+            try:
+                with console.status("[cyan]Fetching media info...[/cyan]"):
+                    info = engine.get_media_info(url)
+                display_media_info(info, console)
+                formats = engine.list_formats(info)
+                display_formats_table(formats, console)
+            except Exception as e:
+                console.print(f"[bold red]Failed to inspect URL:[/bold red] {e}")
+            return 0
+
+        elif choice == "7":
+            display_system_diagnostics()
+            continue
+
+
+def _run_media_wizard(engine: DownloadEngine, url: str, force_audio: bool = False) -> int:
+    """Run media inspection and format selection wizard for a given URL."""
 
     browser = None
     # For social platforms that frequently require cookies (Instagram, Facebook)
@@ -601,6 +771,31 @@ def main(argv: Optional[List[str]] = None) -> int:
                 return 0
             except Exception as e:
                 console.print(f"[bold red]Failed to fetch info:[/bold red] {e}")
+                return 1
+
+        # BitTorrent / Magnet mode
+        if getattr(args, "torrent", False) or is_torrent_or_magnet(args.url):
+            torrent_dl = TorrentDownloader(console)
+            return torrent_dl.download(
+                args.url,
+                output_dir=args.output_dir,
+                connections=args.connections,
+            )
+
+        # Turbo Multi-Connection mode
+        if getattr(args, "turbo", False):
+            turbo = TurboDownloader(connections=args.connections)
+            try:
+                res = turbo.download(
+                    args.url,
+                    output_path=args.output,
+                    output_dir=args.output_dir,
+                    connections=args.connections,
+                    console=console,
+                )
+                return 0 if res else 1
+            except Exception as e:
+                console.print(f"[bold red]Turbo download failed:[/bold red] {e}")
                 return 1
 
         # Single URL download mode
