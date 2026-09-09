@@ -64,6 +64,30 @@ TOOL_SPECS: Dict[str, Dict[str, Any]] = {
             "choco": "choco install ffmpeg",
         },
     },
+    "mpv": {
+        "display": "mpv (Media Player)",
+        "purpose": "stream and play audio and video directly in the CLI",
+        "packages": {
+            "pacman": ["sudo", "pacman", "-S", "--noconfirm", "mpv"],
+            "apt": ["sudo", "apt-get", "install", "-y", "mpv"],
+            "dnf": ["sudo", "dnf", "install", "-y", "mpv"],
+            "zypper": ["sudo", "zypper", "install", "-y", "mpv"],
+            "brew": ["brew", "install", "mpv"],
+            "winget": ["winget", "install", "io-net.mpv", "--silent", "--accept-package-agreements", "--accept-source-agreements"],
+            "scoop": ["scoop", "install", "mpv"],
+            "choco": ["choco", "install", "-y", "mpv"],
+        },
+        "manual_cmds": {
+            "pacman": "sudo pacman -S mpv",
+            "apt": "sudo apt install mpv",
+            "dnf": "sudo dnf install mpv",
+            "zypper": "sudo zypper install mpv",
+            "brew": "brew install mpv",
+            "winget": "winget install mpv",
+            "scoop": "scoop install mpv",
+            "choco": "choco install mpv",
+        },
+    },
 }
 
 

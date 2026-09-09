@@ -398,6 +398,8 @@ class InteractiveTorrentController:
             f"--split={self.connections}",
             "--seed-time=0",
             "--summary-interval=0",
+            "--allow-overwrite=true",
+            "--auto-file-renaming=false",
             "--quiet=true",
             f"--log={log_path}",
             "--log-level=warn",
@@ -738,6 +740,48 @@ class TorrentStreamPlayer:
                 return 1
             player = "mpv"
 
+        # Quick check: does an already completed and playable media file matching this torrent exist?
+        target_clean = self.target
+        existing_candidate: Optional[Path] = None
+        if target_clean.lower().startswith("magnet:?"):
+            meta = parse_magnet_link(target_clean)
+            t_name = meta.get("name")
+            if t_name:
+                cand = self.dest_dir / t_name
+                if cand.exists() and can_demux_media(cand):
+                    existing_candidate = cand
+        elif os.path.isfile(target_clean) and target_clean.lower().endswith(".torrent"):
+            try:
+                t_info = parse_torrent_file(target_clean)
+                for f_info in t_info.get("files", []):
+                    cand = self.dest_dir / f_info.get("path", "")
+                    if cand.exists() and can_demux_media(cand):
+                        existing_candidate = cand
+                        break
+            except Exception:
+                pass
+
+        if existing_candidate:
+            self.console.print(
+                f"\n✨ [bold green]Found existing complete media file in destination directory:[/bold green] "
+                f"[bold white]{existing_candidate.name}[/bold white]"
+            )
+            self.console.print(f"🎬 [bold green]Launching {player.upper()} player immediately...[/bold green]\n")
+            if player == "mpv":
+                player_cmd = [
+                    "mpv",
+                    "--demuxer-readahead-secs=20",
+                    "--cache=yes",
+                    "--cache-secs=30",
+                    "--keep-open=yes",
+                    str(existing_candidate),
+                ]
+            else:
+                player_cmd = ["ffplay", "-autoexit", str(existing_candidate)]
+
+            subprocess.run(player_cmd)
+            return 0
+
         port = find_free_port()
         log_file = tempfile.NamedTemporaryFile(prefix="vdown_stream_", suffix=".log", delete=False)
         log_path = log_file.name
@@ -756,6 +800,8 @@ class TorrentStreamPlayer:
             f"--split={self.connections}",
             "--bt-prioritize-piece=head=30M,tail=15M",
             "--summary-interval=0",
+            "--allow-overwrite=true",
+            "--auto-file-renaming=false",
             "--quiet=true",
             f"--log={log_path}",
             "--log-level=warn",
