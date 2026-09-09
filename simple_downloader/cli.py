@@ -315,16 +315,58 @@ def display_system_diagnostics():
     Prompt.ask("\n[dim]Press Enter to return to main menu...[/dim]", default="")
 
 
+MEDIA_WIZARD_CANCELLED = -1
+
+
+def prompt_post_download_action(console: Console, category_name: str = "item") -> str:
+    """Prompt user for action after a download finishes in interactive mode.
+
+    Returns:
+        'menu': Return to main categories menu
+        'again': Download another link in the current category
+        'exit': Exit the application
+    """
+    console.print("\n[bold yellow]What would you like to do next?[/bold yellow]")
+    console.print("  [1] 🏠 [bold cyan]Main Menu[/bold cyan] (Return to categories) [Default]")
+    console.print(f"  [2] 🔄 [bold green]Download Again[/bold green] (Download another {category_name.lower()})")
+    console.print("  [3] 🚪 [bold red]Exit[/bold red]")
+
+    choice = Prompt.ask("Select option", choices=["1", "2", "3"], default="1")
+    if choice == "1":
+        return "menu"
+    elif choice == "2":
+        return "again"
+    else:
+        return "exit"
+
+
 def _run_interactive_mode_impl(engine: DownloadEngine, initial_url: Optional[str] = None) -> int:
     """Implementation of interactive download wizard."""
     if initial_url:
-        target = initial_url.strip().strip("'\"")
-        if is_torrent_or_magnet(target):
-            if not ensure_tool_installed("aria2c", purpose="download torrents and magnet links at peer-to-peer speeds", console=console):
-                return 1
-            torrent_dl = TorrentDownloader(console)
-            return torrent_dl.download(target)
-        return _run_media_wizard(engine, target)
+        current_target: Optional[str] = initial_url.strip().strip("'\"")
+        while current_target:
+            if is_torrent_or_magnet(current_target):
+                if not ensure_tool_installed("aria2c", purpose="download torrents and magnet links at peer-to-peer speeds", console=console):
+                    return 1
+                torrent_dl = TorrentDownloader(console)
+                torrent_dl.download(current_target)
+            else:
+                res = _run_media_wizard(engine, current_target)
+                if res == MEDIA_WIZARD_CANCELLED:
+                    break
+
+            action = prompt_post_download_action(console, category_name="link")
+            if action == "exit":
+                console.print("\n[bold yellow]👋 Goodbye![/bold yellow]")
+                return 0
+            elif action == "again":
+                next_url = Prompt.ask("\n[bold yellow]Paste next link to download[/bold yellow] [dim]('m' for Main Menu)[/dim]")
+                next_url = next_url.strip().strip("'\"")
+                if not next_url or next_url.lower() in ("m", "menu", "b", "back"):
+                    break
+                current_target = next_url
+            else:  # "menu"
+                break
 
     display_welcome_screen()
 
@@ -346,22 +388,31 @@ def _run_interactive_mode_impl(engine: DownloadEngine, initial_url: Optional[str
             return 0
 
         elif choice == "1":
-            link = Prompt.ask("\n[bold yellow]Paste direct download link (e.g. zip, iso, mp4, tar, installer)[/bold yellow]")
-            link = link.strip().strip("'\"")
-            if not link:
-                continue
-            conn_str = Prompt.ask("Parallel connections (IDM threads: 4-32)", default="16")
-            try:
-                conns = int(conn_str)
-            except ValueError:
-                conns = 16
-            out_dir = Prompt.ask("Destination directory", default="downloads")
-            turbo = TurboDownloader(connections=conns)
-            try:
-                turbo.download(link, output_dir=out_dir, connections=conns, console=console)
-            except Exception as e:
-                console.print(f"[bold red]Download error:[/bold red] {e}")
-            return 0
+            while True:
+                link = Prompt.ask("\n[bold yellow]Paste direct download link (e.g. zip, iso, mp4, tar, installer)[/bold yellow] [dim]('m' for Main Menu)[/dim]")
+                link = link.strip().strip("'\"")
+                if not link or link.lower() in ("m", "menu", "b", "back"):
+                    break
+                conn_str = Prompt.ask("Parallel connections (IDM threads: 4-32)", default="16")
+                try:
+                    conns = int(conn_str)
+                except ValueError:
+                    conns = 16
+                out_dir = Prompt.ask("Destination directory", default="downloads")
+                turbo = TurboDownloader(connections=conns)
+                try:
+                    turbo.download(link, output_dir=out_dir, connections=conns, console=console)
+                except Exception as e:
+                    console.print(f"[bold red]Download error:[/bold red] {e}")
+
+                action = prompt_post_download_action(console, category_name="direct download file")
+                if action == "again":
+                    continue
+                elif action == "exit":
+                    console.print("\n[bold yellow]👋 Goodbye![/bold yellow]")
+                    return 0
+                else:  # "menu"
+                    break
 
         elif choice == "2":
             # Validate aria2c BEFORE asking for the magnet link / torrent file!
@@ -371,13 +422,23 @@ def _run_interactive_mode_impl(engine: DownloadEngine, initial_url: Optional[str
                 console=console,
             ):
                 continue
-            target = Prompt.ask("\n[bold yellow]Paste magnet link (magnet:?...) or path to .torrent file[/bold yellow]")
-            target = target.strip().strip("'\"")
-            if not target:
-                continue
-            out_dir = Prompt.ask("Destination directory", default="downloads")
-            torrent_dl = TorrentDownloader(console)
-            return torrent_dl.download(target, output_dir=out_dir)
+            while True:
+                target = Prompt.ask("\n[bold yellow]Paste magnet link (magnet:?...) or path to .torrent file[/bold yellow] [dim]('m' for Main Menu)[/dim]")
+                target = target.strip().strip("'\"")
+                if not target or target.lower() in ("m", "menu", "b", "back"):
+                    break
+                out_dir = Prompt.ask("Destination directory", default="downloads")
+                torrent_dl = TorrentDownloader(console)
+                torrent_dl.download(target, output_dir=out_dir)
+
+                action = prompt_post_download_action(console, category_name="torrent or magnet link")
+                if action == "again":
+                    continue
+                elif action == "exit":
+                    console.print("\n[bold yellow]👋 Goodbye![/bold yellow]")
+                    return 0
+                else:  # "menu"
+                    break
 
         elif choice == "3":
             if not ensure_tool_installed(
@@ -386,11 +447,23 @@ def _run_interactive_mode_impl(engine: DownloadEngine, initial_url: Optional[str
                 console=console,
             ):
                 continue
-            url = Prompt.ask("\n[bold yellow]Paste video or stream link (YouTube, TikTok, IG, FB, Web)[/bold yellow]")
-            url = url.strip().strip("'\"")
-            if not url:
-                continue
-            return _run_media_wizard(engine, url, force_audio=False)
+            while True:
+                url = Prompt.ask("\n[bold yellow]Paste video or stream link (YouTube, TikTok, IG, FB, Web)[/bold yellow] [dim]('m' for Main Menu)[/dim]")
+                url = url.strip().strip("'\"")
+                if not url or url.lower() in ("m", "menu", "b", "back"):
+                    break
+                res = _run_media_wizard(engine, url, force_audio=False)
+                if res == MEDIA_WIZARD_CANCELLED:
+                    break
+
+                action = prompt_post_download_action(console, category_name="video or stream link")
+                if action == "again":
+                    continue
+                elif action == "exit":
+                    console.print("\n[bold yellow]👋 Goodbye![/bold yellow]")
+                    return 0
+                else:  # "menu"
+                    break
 
         elif choice == "4":
             if not ensure_tool_installed(
@@ -399,35 +472,66 @@ def _run_interactive_mode_impl(engine: DownloadEngine, initial_url: Optional[str
                 console=console,
             ):
                 continue
-            url = Prompt.ask("\n[bold yellow]Paste song, album, playlist or video link (Spotify, TIDAL, Apple Music, YouTube, etc.)[/bold yellow]")
-            url = url.strip().strip("'\"")
-            if not url:
-                continue
-            return _run_media_wizard(engine, url, force_audio=True)
+            while True:
+                url = Prompt.ask("\n[bold yellow]Paste song, album, playlist or video link (Spotify, TIDAL, Apple Music, YouTube, etc.)[/bold yellow] [dim]('m' for Main Menu)[/dim]")
+                url = url.strip().strip("'\"")
+                if not url or url.lower() in ("m", "menu", "b", "back"):
+                    break
+                res = _run_media_wizard(engine, url, force_audio=True)
+                if res == MEDIA_WIZARD_CANCELLED:
+                    break
+
+                action = prompt_post_download_action(console, category_name="music or audio link")
+                if action == "again":
+                    continue
+                elif action == "exit":
+                    console.print("\n[bold yellow]👋 Goodbye![/bold yellow]")
+                    return 0
+                else:  # "menu"
+                    break
 
         elif choice == "5":
-            batch_path = Prompt.ask("\n[bold yellow]Enter path to text file containing URLs[/bold yellow]", default="links.txt")
-            batch_path = batch_path.strip().strip("'\"")
-            if not batch_path:
-                continue
-            parser = create_parser()
-            args = parser.parse_args(["-b", batch_path])
-            return process_batch_file(batch_path, engine, args)
+            while True:
+                batch_path = Prompt.ask("\n[bold yellow]Enter path to text file containing URLs[/bold yellow] [dim]('m' for Main Menu)[/dim]", default="links.txt")
+                batch_path = batch_path.strip().strip("'\"")
+                if not batch_path or batch_path.lower() in ("m", "menu", "b", "back"):
+                    break
+                parser = create_parser()
+                args = parser.parse_args(["-b", batch_path])
+                process_batch_file(batch_path, engine, args)
+
+                action = prompt_post_download_action(console, category_name="batch file")
+                if action == "again":
+                    continue
+                elif action == "exit":
+                    console.print("\n[bold yellow]👋 Goodbye![/bold yellow]")
+                    return 0
+                else:  # "menu"
+                    break
 
         elif choice == "6":
-            url = Prompt.ask("\n[bold yellow]Paste media link to inspect[/bold yellow]")
-            url = url.strip().strip("'\"")
-            if not url:
-                continue
-            try:
-                with console.status("[cyan]Fetching media info...[/cyan]"):
-                    info = engine.get_media_info(url)
-                display_media_info(info, console)
-                formats = engine.list_formats(info)
-                display_formats_table(formats, console)
-            except Exception as e:
-                console.print(f"[bold red]Failed to inspect URL:[/bold red] {e}")
-            return 0
+            while True:
+                url = Prompt.ask("\n[bold yellow]Paste media link to inspect[/bold yellow] [dim]('m' for Main Menu)[/dim]")
+                url = url.strip().strip("'\"")
+                if not url or url.lower() in ("m", "menu", "b", "back"):
+                    break
+                try:
+                    with console.status("[cyan]Fetching media info...[/cyan]"):
+                        info = engine.get_media_info(url)
+                    display_media_info(info, console)
+                    formats = engine.list_formats(info)
+                    display_formats_table(formats, console)
+                except Exception as e:
+                    console.print(f"[bold red]Failed to inspect URL:[/bold red] {e}")
+
+                action = prompt_post_download_action(console, category_name="media link to inspect")
+                if action == "again":
+                    continue
+                elif action == "exit":
+                    console.print("\n[bold yellow]👋 Goodbye![/bold yellow]")
+                    return 0
+                else:  # "menu"
+                    break
 
         elif choice == "7":
             display_system_diagnostics()
@@ -485,11 +589,10 @@ def _run_media_wizard(engine: DownloadEngine, url: str, force_audio: bool = Fals
             console.print("  [3] 🎬 Download Single Video Only")
             pl_choice = Prompt.ask("Playlist Selection", choices=["1", "2", "3"], default="1")
         else:
-            console.print("  [3] ❌ Exit")
+            console.print("  [3] ↩️ Back to Main Menu")
             pl_choice = Prompt.ask("Playlist Selection", choices=["1", "2", "3"], default="1")
             if pl_choice == "3":
-                console.print("\n[bold yellow]👋 Goodbye![/bold yellow]")
-                return 0
+                return MEDIA_WIZARD_CANCELLED
 
         if pl_choice == "1":
             playlist = True
@@ -511,23 +614,22 @@ def _run_media_wizard(engine: DownloadEngine, url: str, force_audio: bool = Fals
         console.print("  [3] 🎵 Audio Only (MP3, FLAC Lossless, M4A, WAV, etc.)")
         if not is_playlist:
             console.print("  [4] 📋 List All Available Formats")
-            console.print("  [5] ❌ Exit")
+            console.print("  [5] ↩️ Back to Main Menu")
             choice = Prompt.ask("Select option", choices=["1", "2", "3", "4", "5"], default="1")
         else:
-            console.print("  [4] ❌ Exit")
+            console.print("  [4] ↩️ Back to Main Menu")
             choice = Prompt.ask("Select option", choices=["1", "2", "3", "4"], default="1")
             if choice == "4":
                 choice = "5"
 
     if choice == "5":
-        console.print("\n[bold yellow]👋 Goodbye![/bold yellow]")
-        return 0
+        return MEDIA_WIZARD_CANCELLED
 
     if choice == "4" and not is_playlist:
         formats = engine.list_formats(info)
         display_formats_table(formats, console)
         if not Confirm.ask("\nProceed to download a specific format?", default=True):
-            return 0
+            return MEDIA_WIZARD_CANCELLED
         format_id = Prompt.ask("Enter Format ID to download")
         out_dir = Prompt.ask("Output directory", default="downloads")
         return do_download(

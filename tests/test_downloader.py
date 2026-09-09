@@ -267,6 +267,113 @@ class TestCLIParser(unittest.TestCase):
                 calls = [str(call) for call in mock_print.call_args_list]
                 self.assertTrue(any("Goodbye" in c for c in calls))
 
+    def test_prompt_post_download_action_options(self):
+        from unittest.mock import patch
+        from simple_downloader.cli import prompt_post_download_action, console
+
+        with patch("simple_downloader.cli.console.print"):
+            with patch("simple_downloader.cli.Prompt.ask", return_value="1"):
+                self.assertEqual(prompt_post_download_action(console, "audio"), "menu")
+
+            with patch("simple_downloader.cli.Prompt.ask", return_value="2"):
+                self.assertEqual(prompt_post_download_action(console, "audio"), "again")
+
+            with patch("simple_downloader.cli.Prompt.ask", return_value="3"):
+                self.assertEqual(prompt_post_download_action(console, "audio"), "exit")
+
+    def test_interactive_mode_download_and_return_to_main_menu(self):
+        from unittest.mock import patch
+        from simple_downloader.cli import run_interactive_mode
+        from simple_downloader.engine import DownloadEngine
+
+        engine = DownloadEngine()
+        # Flow:
+        # 1. Main menu: choice '4' (Music & Audio)
+        # 2. Music prompt: 'https://open.spotify.com/track/123'
+        # 3. Post-download action: '1' (Main Menu)
+        # 4. Main menu: choice '8' (Exit)
+        prompt_responses = ["4", "https://open.spotify.com/track/123", "1", "8"]
+
+        with patch("simple_downloader.cli.is_tool_installed", return_value=True), \
+             patch("simple_downloader.cli._run_media_wizard", return_value=0) as mock_wizard, \
+             patch("simple_downloader.cli.Prompt.ask", side_effect=prompt_responses), \
+             patch("simple_downloader.cli.console.print"):
+            exit_code = run_interactive_mode(engine)
+            self.assertEqual(exit_code, 0)
+            mock_wizard.assert_called_once_with(engine, "https://open.spotify.com/track/123", force_audio=True)
+
+    def test_interactive_mode_download_again(self):
+        from unittest.mock import patch
+        from simple_downloader.cli import run_interactive_mode
+        from simple_downloader.engine import DownloadEngine
+
+        engine = DownloadEngine()
+        # Flow:
+        # 1. Main menu: choice '4' (Music & Audio)
+        # 2. Track 1 URL: 'https://open.spotify.com/track/1'
+        # 3. Post-download action: '2' (Download Again)
+        # 4. Track 2 URL: 'https://open.spotify.com/track/2'
+        # 5. Post-download action: '3' (Exit)
+        prompt_responses = [
+            "4",
+            "https://open.spotify.com/track/1",
+            "2",
+            "https://open.spotify.com/track/2",
+            "3",
+        ]
+
+        with patch("simple_downloader.cli.is_tool_installed", return_value=True), \
+             patch("simple_downloader.cli._run_media_wizard", return_value=0) as mock_wizard, \
+             patch("simple_downloader.cli.Prompt.ask", side_effect=prompt_responses), \
+             patch("simple_downloader.cli.console.print"):
+            exit_code = run_interactive_mode(engine)
+            self.assertEqual(exit_code, 0)
+            self.assertEqual(mock_wizard.call_count, 2)
+            mock_wizard.assert_any_call(engine, "https://open.spotify.com/track/1", force_audio=True)
+            mock_wizard.assert_any_call(engine, "https://open.spotify.com/track/2", force_audio=True)
+
+    def test_interactive_initial_url_to_main_menu(self):
+        from unittest.mock import patch
+        from simple_downloader.cli import run_interactive_mode
+        from simple_downloader.engine import DownloadEngine
+
+        engine = DownloadEngine()
+        # Flow:
+        # 1. Initial URL download finishes
+        # 2. Post-download action: '1' (Main Menu)
+        # 3. Main menu: choice '8' (Exit)
+        prompt_responses = ["1", "8"]
+
+        with patch("simple_downloader.cli.is_tool_installed", return_value=True), \
+             patch("simple_downloader.cli._run_media_wizard", return_value=0) as mock_wizard, \
+             patch("simple_downloader.cli.Prompt.ask", side_effect=prompt_responses), \
+             patch("simple_downloader.cli.console.print"):
+            exit_code = run_interactive_mode(engine, initial_url="https://youtube.com/watch?v=initial123")
+            self.assertEqual(exit_code, 0)
+            mock_wizard.assert_called_once_with(engine, "https://youtube.com/watch?v=initial123")
+
+    def test_interactive_submenu_back_to_main_menu(self):
+        from unittest.mock import patch
+        from simple_downloader.cli import run_interactive_mode, MEDIA_WIZARD_CANCELLED
+        from simple_downloader.engine import DownloadEngine
+
+        engine = DownloadEngine()
+        # Flow:
+        # 1. Main menu: choice '3' (Video & Stream)
+        # 2. Video URL: 'https://youtube.com/watch?v=123'
+        # 3. _run_media_wizard cancelled (user chose Back to Main Menu) -> returns MEDIA_WIZARD_CANCELLED
+        # 4. Returned directly to Main menu: choice '8' (Exit)
+        prompt_responses = ["3", "https://youtube.com/watch?v=123", "8"]
+
+        with patch("simple_downloader.cli.is_tool_installed", return_value=True), \
+             patch("simple_downloader.cli._run_media_wizard", return_value=MEDIA_WIZARD_CANCELLED) as mock_wizard, \
+             patch("simple_downloader.cli.Prompt.ask", side_effect=prompt_responses), \
+             patch("simple_downloader.cli.console.print"):
+            exit_code = run_interactive_mode(engine)
+            self.assertEqual(exit_code, 0)
+            mock_wizard.assert_called_once_with(engine, "https://youtube.com/watch?v=123", force_audio=False)
+
+
 
 class TestWebpageVideoScraper(unittest.TestCase):
     """Test webpage video scraper for embedded videos."""
