@@ -21,6 +21,7 @@ from simple_downloader.scraper import WebpageVideoScraper
 from simple_downloader.tiktok import TikTokDownloader, is_tiktok_url
 from simple_downloader.spotify import SpotifyDownloader, is_spotify_url
 from simple_downloader.tidal import TidalDownloader, is_tidal_url
+from simple_downloader.applemusic import AppleMusicDownloader, is_apple_music_url
 from simple_downloader.utils import (
     is_direct_media_url,
     format_bytes,
@@ -77,6 +78,16 @@ class DownloadEngine:
                 td_info = td.get_info(url)
                 if td_info:
                     return td_info
+            except Exception:
+                pass
+
+        # Specialized Apple Music handler (songs, albums, playlists)
+        if is_apple_music_url(url):
+            try:
+                am = AppleMusicDownloader(console=self.console)
+                am_info = am.get_info(url)
+                if am_info:
+                    return am_info
             except Exception:
                 pass
 
@@ -334,6 +345,32 @@ class DownloadEngine:
                         )
             except Exception as e:
                 self.console.print(f"[yellow]TIDAL download failed: {e}.[/yellow]")
+                raise e
+
+        # Specialized Apple Music handler (songs, playlists, albums)
+        if (info and info.get("is_apple_music")) or is_apple_music_url(url):
+            try:
+                am = AppleMusicDownloader(console=self.console)
+                am_info = info if (info and info.get("is_apple_music")) else am.get_info(url)
+                if am_info:
+                    if am_info.get("is_playlist"):
+                        return am.download_collection(
+                            info=am_info,
+                            base_dest=Path(output_dir or "downloads").expanduser().resolve(),
+                            playlist_items=playlist_items,
+                            audio_format=audio_format or "flac",
+                            audio_quality=audio_quality or "320",
+                        )
+                    else:
+                        return am.download_track(
+                            track_info=am_info,
+                            output_path=output_path,
+                            output_dir=output_dir or "downloads",
+                            audio_format=audio_format or "flac",
+                            audio_quality=audio_quality or "320",
+                        )
+            except Exception as e:
+                self.console.print(f"[yellow]Apple Music download failed: {e}.[/yellow]")
                 raise e
 
         # If info indicated direct stream or scraper extracted an embedded stream URL

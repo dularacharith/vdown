@@ -1130,6 +1130,235 @@ class TestTidalDownloader(unittest.TestCase):
             self.assertEqual(call_kwargs["audio_format"], "flac")
 
 
+class TestAppleMusicDownloader(unittest.TestCase):
+    """Unit tests for Apple Music lossless track, album, and playlist downloader."""
+
+    def test_is_apple_music_url_and_parsing(self):
+        from simple_downloader.applemusic import is_apple_music_url, parse_apple_music_url
+
+        self.assertTrue(is_apple_music_url("https://music.apple.com/us/album/better-together/1440857781?i=1440857786"))
+        self.assertTrue(is_apple_music_url("https://music.apple.com/us/album/in-between-dreams/1440857781"))
+        self.assertTrue(is_apple_music_url("https://music.apple.com/us/song/better-together/1440857786"))
+        self.assertTrue(is_apple_music_url("https://music.apple.com/song/1440857786"))
+        self.assertTrue(is_apple_music_url("https://music.apple.com/album/1440857781"))
+        self.assertTrue(is_apple_music_url("https://music.apple.com/us/playlist/apple-music-list/pl.41fda5adbf9b4db4ba1a2c0a76099ef9"))
+        self.assertTrue(is_apple_music_url("https://embed.music.apple.com/us/playlist/august-2026/pl.u-W3mVfPPj76"))
+        self.assertFalse(is_apple_music_url("https://open.spotify.com/track/12345"))
+        self.assertFalse(is_apple_music_url("https://tidal.com/track/12345"))
+        self.assertFalse(is_apple_music_url(None))
+        self.assertFalse(is_apple_music_url(""))
+
+        self.assertEqual(
+            parse_apple_music_url("https://music.apple.com/us/album/better-together/1440857781?i=1440857786"),
+            ("song", "1440857786")
+        )
+        self.assertEqual(
+            parse_apple_music_url("https://music.apple.com/us/album/in-between-dreams/1440857781"),
+            ("album", "1440857781")
+        )
+        self.assertEqual(
+            parse_apple_music_url("https://music.apple.com/us/playlist/apple-music-list/pl.41fda5adbf9b4db4ba1a2c0a76099ef9"),
+            ("playlist", "pl.41fda5adbf9b4db4ba1a2c0a76099ef9")
+        )
+
+    def test_build_apple_artwork_url(self):
+        from simple_downloader.applemusic import build_apple_artwork_url
+
+        self.assertIsNone(build_apple_artwork_url(None))
+        raw_art = "https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/44/06/fd/cover.rgb.jpg/100x100bb.jpg"
+        scaled = build_apple_artwork_url(raw_art, size=1400)
+        self.assertEqual(scaled, "https://is1-ssl.mzstatic.com/image/thumb/Music115/v4/44/06/fd/cover.rgb.jpg/1400x1400bb.jpg")
+
+    def test_apple_music_song_info_mock(self):
+        from unittest.mock import patch, Mock
+        from simple_downloader.applemusic import AppleMusicDownloader
+
+        am = AppleMusicDownloader()
+        mock_api_data = {
+            "resultCount": 1,
+            "results": [
+                {
+                    "wrapperType": "track",
+                    "trackId": 1440857786,
+                    "trackName": "Better Together",
+                    "artistName": "Jack Johnson",
+                    "collectionName": "In Between Dreams",
+                    "trackTimeMillis": 207679,
+                    "artworkUrl100": "https://is1-ssl.mzstatic.com/image/cover/100x100bb.jpg",
+                    "trackNumber": 1,
+                    "releaseDate": "2005-03-01T08:00:00Z",
+                }
+            ]
+        }
+        mock_resp = Mock(status_code=200)
+        mock_resp.json.return_value = mock_api_data
+
+        with patch("requests.get", return_value=mock_resp):
+            info = am.get_info("https://music.apple.com/us/song/better-together/1440857786")
+
+        self.assertIsNotNone(info)
+        self.assertTrue(info["is_apple_music"])
+        self.assertFalse(info["is_playlist"])
+        self.assertEqual(info["track_title"], "Better Together")
+        self.assertEqual(info["artist"], "Jack Johnson")
+        self.assertEqual(info["album"], "In Between Dreams")
+        self.assertEqual(info["duration"], 207)
+        self.assertEqual(info["track_number"], 1)
+        self.assertIn("1400x1400bb.jpg", info["thumbnail"])
+
+    def test_apple_music_album_info_mock(self):
+        from unittest.mock import patch, Mock
+        from simple_downloader.applemusic import AppleMusicDownloader
+
+        am = AppleMusicDownloader()
+        mock_album_data = {
+            "resultCount": 3,
+            "results": [
+                {
+                    "wrapperType": "collection",
+                    "collectionId": 1440857781,
+                    "collectionName": "In Between Dreams",
+                    "artistName": "Jack Johnson",
+                    "artworkUrl100": "https://is1-ssl.mzstatic.com/image/cover/100x100bb.jpg",
+                    "releaseDate": "2005-03-01T08:00:00Z",
+                },
+                {
+                    "wrapperType": "track",
+                    "trackId": 1440857786,
+                    "trackName": "Better Together",
+                    "artistName": "Jack Johnson",
+                    "trackTimeMillis": 207000,
+                    "trackNumber": 1,
+                },
+                {
+                    "wrapperType": "track",
+                    "trackId": 1440857794,
+                    "trackName": "Never Know",
+                    "artistName": "Jack Johnson",
+                    "trackTimeMillis": 212000,
+                    "trackNumber": 2,
+                }
+            ]
+        }
+        mock_resp = Mock(status_code=200)
+        mock_resp.json.return_value = mock_album_data
+
+        with patch("requests.get", return_value=mock_resp):
+            info = am.get_info("https://music.apple.com/us/album/in-between-dreams/1440857781")
+
+        self.assertIsNotNone(info)
+        self.assertTrue(info["is_apple_music"])
+        self.assertTrue(info["is_playlist"])
+        self.assertEqual(info["apple_music_type"], "album")
+        self.assertEqual(info["album_title"], "In Between Dreams")
+        self.assertEqual(info["playlist_count"], 2)
+        self.assertEqual(len(info["entries"]), 2)
+        self.assertEqual(info["entries"][0]["track_title"], "Better Together")
+
+    def test_apple_music_playlist_info_mock(self):
+        from unittest.mock import patch, Mock
+        from simple_downloader.applemusic import AppleMusicDownloader
+
+        am = AppleMusicDownloader()
+        mock_html = '''
+        <html><head>
+        <meta property="og:title" content="Top Hits on Apple Music" />
+        <meta property="og:image" content="https://is1-ssl.mzstatic.com/image/pl_cover/100x100bb.jpg" />
+        <meta property="music:song" content="https://music.apple.com/us/song/song-one/11111" />
+        <meta property="music:song" content="https://music.apple.com/us/song/song-two/22222" />
+        </head><body></body></html>
+        '''
+        mock_batch_data = {
+            "resultCount": 2,
+            "results": [
+                {
+                    "trackId": 11111,
+                    "trackName": "Song One",
+                    "artistName": "Artist A",
+                    "collectionName": "Album A",
+                    "trackTimeMillis": 180000,
+                },
+                {
+                    "trackId": 22222,
+                    "trackName": "Song Two",
+                    "artistName": "Artist B",
+                    "collectionName": "Album B",
+                    "trackTimeMillis": 200000,
+                }
+            ]
+        }
+
+        resp_html = Mock(status_code=200, text=mock_html)
+        resp_batch = Mock(status_code=200)
+        resp_batch.json.return_value = mock_batch_data
+
+        with patch("requests.get", side_effect=[resp_html, resp_batch]):
+            info = am.get_info("https://music.apple.com/us/playlist/top-hits/pl.12345")
+
+        self.assertIsNotNone(info)
+        self.assertTrue(info["is_apple_music"])
+        self.assertTrue(info["is_playlist"])
+        self.assertEqual(info["title"], "Top Hits")
+        self.assertEqual(info["playlist_count"], 2)
+        self.assertEqual(info["entries"][0]["track_title"], "Song One")
+
+    def test_apple_music_resolve_audio_stream_proximity(self):
+        from unittest.mock import patch, MagicMock
+        from simple_downloader.applemusic import AppleMusicDownloader
+        import yt_dlp
+
+        am = AppleMusicDownloader()
+        mock_candidates = [
+            {"id": "long_music_video", "title": "Jack Johnson - Better Together (Official Video)", "duration": 350},
+            {"id": "studio_audio_track", "title": "Jack Johnson - Better Together (Audio)", "duration": 208},
+            {"id": "short_clip", "title": "Better Together Preview", "duration": 25},
+        ]
+        mock_ydl = MagicMock()
+        mock_ydl.__enter__.return_value = mock_ydl
+        mock_ydl.extract_info.return_value = {"entries": mock_candidates}
+
+        with patch.object(yt_dlp, "YoutubeDL", return_value=mock_ydl):
+            resolved = am.resolve_audio_stream("Jack Johnson", "Better Together", expected_duration=207)
+
+        self.assertEqual(resolved, "https://www.youtube.com/watch?v=studio_audio_track")
+
+    def test_apple_music_engine_routing(self):
+        from unittest.mock import patch
+        from simple_downloader.engine import DownloadEngine
+
+        engine = DownloadEngine()
+        with patch("simple_downloader.engine.AppleMusicDownloader") as mock_am_cls:
+            mock_am_inst = mock_am_cls.return_value
+            mock_am_inst.get_info.return_value = {
+                "id": "1440857786", "title": "Jack Johnson - Better Together", "is_apple_music": True, "is_playlist": False,
+            }
+            mock_am_inst.download_track.return_value = "/downloads/Better_Together.flac"
+
+            info = engine.get_media_info("https://music.apple.com/us/song/better-together/1440857786")
+            self.assertTrue(info.get("is_apple_music"))
+
+            res = engine.download(
+                "https://music.apple.com/us/song/better-together/1440857786",
+                audio_format="flac",
+                show_progress=False,
+            )
+            self.assertEqual(res, "/downloads/Better_Together.flac")
+            mock_am_inst.download_track.assert_called_once()
+
+    def test_cli_apple_music_routing(self):
+        from unittest.mock import patch
+        from simple_downloader.cli import main
+
+        with patch("sys.argv", ["vdown", "https://music.apple.com/us/song/better-together/1440857786", "--audio-format", "flac"]), \
+             patch("simple_downloader.cli.do_download") as mock_dd, \
+             patch("simple_downloader.cli.DownloadEngine"):
+            main()
+            mock_dd.assert_called_once()
+            call_kwargs = mock_dd.call_args[1]
+            self.assertTrue(call_kwargs["audio_only"])
+            self.assertEqual(call_kwargs["audio_format"], "flac")
+
+
 class TestTurboAndTorrentDownloader(unittest.TestCase):
     """Unit tests for IDM-style Turbo multi-connection and BitTorrent modules."""
 

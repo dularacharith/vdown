@@ -242,7 +242,7 @@ def display_welcome_screen():
         f"• [bold cyan]🚀 Turbo Multi-Stream:[/bold cyan] IDM-style parallel segmented downloading to bypass bandwidth throttle\n"
         f"• [bold magenta]🧲 P2P Torrents & Magnets:[/bold magenta] Unthrottled BitTorrent peer-to-peer swarms\n"
         f"• [bold blue]🎬 Video & Streams:[/bold blue] YouTube (playlists & singles), TikTok (watermark-free), Instagram, Facebook\n"
-        f"• [bold green]🎵 Studio Audio Quality:[/bold green] FLAC Lossless, 320 kbps MP3, WAV with embedded splash art (Spotify & TIDAL)\n"
+        f"• [bold green]🎵 Studio Audio Quality:[/bold green] FLAC Lossless, 320 kbps MP3, WAV with embedded splash art (Spotify, TIDAL & Apple Music)\n"
         f"• [dim]Default Output Folder: [underline]{os.path.abspath('downloads')}[/underline][/dim]"
     )
     console.print(
@@ -333,7 +333,7 @@ def _run_interactive_mode_impl(engine: DownloadEngine, initial_url: Optional[str
         console.print("  [1] 🚀 [bold cyan]Turbo Download[/bold cyan] (IDM-style Multi-Connection File Accelerator)")
         console.print("  [2] 🧲 [bold magenta]Torrent & Magnet[/bold magenta] (P2P High-Speed Swarm Downloader)")
         console.print("  [3] 🎬 [bold blue]Video & Stream[/bold blue] (YouTube, TikTok, Reels, Facebook, Web)")
-        console.print("  [4] 🎵 [bold green]Music & Audio[/bold green] (Spotify, TIDAL, FLAC Lossless, 320k MP3, WAV)")
+        console.print("  [4] 🎵 [bold green]Music & Audio[/bold green] (Spotify, TIDAL, Apple Music, FLAC Lossless, 320k MP3, WAV)")
         console.print("  [5] 📁 [bold white]Batch Download[/bold white] (Download links from a text file)")
         console.print("  [6] ℹ️ [bold yellow]Media Inspector[/bold yellow] (Inspect link formats and quality)")
         console.print("  [7] ⚙️ [bold dim]System Diagnostics[/bold dim] (Check FFmpeg, aria2c, disk space)")
@@ -399,7 +399,7 @@ def _run_interactive_mode_impl(engine: DownloadEngine, initial_url: Optional[str
                 console=console,
             ):
                 continue
-            url = Prompt.ask("\n[bold yellow]Paste song, album, playlist or video link (Spotify, TIDAL, YouTube, etc.)[/bold yellow]")
+            url = Prompt.ask("\n[bold yellow]Paste song, album, playlist or video link (Spotify, TIDAL, Apple Music, YouTube, etc.)[/bold yellow]")
             url = url.strip().strip("'\"")
             if not url:
                 continue
@@ -461,19 +461,27 @@ def _run_media_wizard(engine: DownloadEngine, url: str, force_audio: bool = Fals
     # Detect playlist presence in link
     is_sp = info.get("is_spotify", False)
     is_tidal = info.get("is_tidal", False)
+    is_apple = info.get("is_apple_music", False)
     is_playlist = info.get("is_playlist", False) or ("list=" in url.lower())
     playlist = False
     playlist_items = None
 
     if is_playlist:
         entry_count = info.get("playlist_count") or len(info.get("entries") or [])
-        item_word = "tracks" if (is_sp or is_tidal) else "videos"
+        item_word = "tracks" if (is_sp or is_tidal or is_apple) else "videos"
         count_str = f" ({entry_count} {item_word})" if entry_count else ""
-        platform_name = "TIDAL" if is_tidal else ("Spotify" if is_sp else "YouTube")
+        if is_apple:
+            platform_name = "Apple Music"
+        elif is_tidal:
+            platform_name = "TIDAL"
+        elif is_sp:
+            platform_name = "Spotify"
+        else:
+            platform_name = "YouTube"
         console.print(f"\n[bold yellow]📂 {platform_name} Collection Detected{count_str}[/bold yellow]")
         console.print("  [1] 📥 Download Entire Collection [Default]")
         console.print("  [2] 🔢 Download Specific Range / Items (e.g. 1-10, 1,3,5)")
-        if not (is_sp or is_tidal):
+        if not (is_sp or is_tidal or is_apple):
             console.print("  [3] 🎬 Download Single Video Only")
             pl_choice = Prompt.ask("Playlist Selection", choices=["1", "2", "3"], default="1")
         else:
@@ -494,7 +502,7 @@ def _run_media_wizard(engine: DownloadEngine, url: str, force_audio: bool = Fals
         elif pl_choice == "3":
             playlist = False
 
-    if is_sp or is_tidal or force_audio:
+    if is_sp or is_tidal or is_apple or force_audio:
         choice = "3"
     else:
         console.print("\n[bold yellow]What would you like to do?[/bold yellow]")
@@ -847,6 +855,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         from simple_downloader.spotify import is_spotify_url, parse_spotify_url
         from simple_downloader.tidal import is_tidal_url, parse_tidal_url
+        from simple_downloader.applemusic import is_apple_music_url, parse_apple_music_url
 
         is_spotify = is_spotify_url(args.url) if args.url else False
         is_sp_playlist = False
@@ -862,9 +871,21 @@ def main(argv: Optional[List[str]] = None) -> int:
             if parsed_td and parsed_td[0] in ("playlist", "album"):
                 is_tidal_collection = True
 
-        is_pure_playlist = bool(args.url and ("playlist?list=" in args.url.lower())) or is_sp_playlist or is_tidal_collection
+        is_apple = is_apple_music_url(args.url) if args.url else False
+        is_apple_collection = False
+        if is_apple:
+            parsed_am = parse_apple_music_url(args.url)
+            if parsed_am and parsed_am[0] in ("playlist", "album"):
+                is_apple_collection = True
+
+        is_pure_playlist = (
+            bool(args.url and ("playlist?list=" in args.url.lower()))
+            or is_sp_playlist
+            or is_tidal_collection
+            or is_apple_collection
+        )
         playlist = (args.playlist or is_pure_playlist or bool(args.playlist_items)) and not args.no_playlist
-        audio_only = args.audio_only or is_spotify or is_tidal
+        audio_only = args.audio_only or is_spotify or is_tidal or is_apple
 
         return do_download(
             engine=engine,
