@@ -1772,6 +1772,33 @@ class TestTurboAndTorrentDownloader(unittest.TestCase):
             self.assertEqual(res["status"], "active")
             self.assertEqual(res["totalLength"], "1000")
 
+    def test_is_media_header_valid(self):
+        import tempfile
+        from pathlib import Path
+        from simple_downloader.torrent import is_media_header_valid, can_demux_media
+
+        with tempfile.TemporaryDirectory() as td:
+            # 1. Non-existent file
+            self.assertFalse(is_media_header_valid(Path(td) / "none.mkv"))
+
+            # 2. Sparse / zeroed file
+            sparse = Path(td) / "zero.mkv"
+            with open(sparse, "wb") as f:
+                f.write(b"\x00" * 8192)
+            self.assertFalse(is_media_header_valid(sparse))
+
+            # 3. Valid MKV header
+            valid_mkv = Path(td) / "valid.mkv"
+            with open(valid_mkv, "wb") as f:
+                f.write(b"\x1a\x45\xdf\xa3" + b"\x00" * 8192)
+            self.assertTrue(is_media_header_valid(valid_mkv))
+
+            # 4. Valid MP4 header
+            valid_mp4 = Path(td) / "valid.mp4"
+            with open(valid_mp4, "wb") as f:
+                f.write(b"\x00\x00\x00\x18ftypmp42" + b"\x00" * 8192)
+            self.assertTrue(is_media_header_valid(valid_mp4))
+
     def test_welcome_screen_and_diagnostics(self):
         from simple_downloader.cli import display_welcome_screen, ASCII_BANNER
         from unittest.mock import patch

@@ -238,6 +238,61 @@ def render_progress_bar(percent: float, width: int = 16) -> str:
     return f"[cyan]{filled}{empty}[/cyan] [bold white]{percent:5.1f}%[/bold white]"
 
 
+def is_media_header_valid(file_path: Path) -> bool:
+    """Verify that the media file on disk exists and has a valid, non-zero container header."""
+    if not file_path.exists():
+        return False
+    try:
+        if file_path.stat().st_size < 4096:
+            return False
+        with open(file_path, "rb") as f:
+            header = f.read(64)
+        if not header or header[:4] == b"\x00\x00\x00\x00":
+            return False
+
+        ext = file_path.suffix.lower()
+        if ext in (".mkv", ".webm"):
+            return header.startswith(b"\x1a\x45\xdf\xa3")
+        elif ext in (".mp4", ".mov", ".m4v", ".m4a"):
+            return b"ftyp" in header[:32] or b"moov" in header[:32]
+        elif ext in (".avi", ".wav"):
+            return header.startswith(b"RIFF")
+        elif ext == ".flac":
+            return header.startswith(b"fLaC")
+        elif ext in (".ogg", ".opus"):
+            return header.startswith(b"OggS")
+        elif ext == ".mp3":
+            return header.startswith(b"ID3") or header[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2")
+
+        return header[0] != 0
+    except Exception:
+        return False
+
+
+def can_demux_media(file_path: Path) -> bool:
+    """Check if ffprobe can demux the initial container header without errors."""
+    if not is_media_header_valid(file_path):
+        return False
+    if not shutil.which("ffprobe"):
+        return True
+    try:
+        res = subprocess.run(
+            [
+                "ffprobe",
+                "-v", "error",
+                "-show_entries", "format=format_name",
+                "-of", "default=noprint_wrappers=1:nokey=1",
+                str(file_path),
+            ],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=1.5,
+        )
+        return res.returncode == 0
+    except Exception:
+        return True
+
+
 class Aria2RpcClient:
     """Lightweight pure-Python JSON-RPC client for aria2c daemon."""
 
@@ -670,7 +725,7 @@ class TorrentStreamPlayer:
         self.console = console or Console()
 
     def run(self) -> int:
-        """Stream the torrent media with sequential piece prioritization."""
+        """Stream the torrent media with sequential piece prioritization and verified container headers."""
         # Check player
         player = "mpv" if is_tool_installed("mpv") else ("ffplay" if is_tool_installed("ffplay") else None)
         if not player:
@@ -699,8 +754,7 @@ class TorrentStreamPlayer:
             "--bt-max-peers=60",
             f"--max-connection-per-server={self.connections}",
             f"--split={self.connections}",
-            "--bt-prioritize-piece=head=25M,tail=15M",
-            "--file-allocation=trunc",
+            "--bt-prioritize-piece=head=30M,tail=15M",
             "--summary-interval=0",
             "--quiet=true",
             f"--log={log_path}",
@@ -749,67 +803,155 @@ class TorrentStreamPlayer:
                 pass
             return 1
 
-        self.console.print("\n[bold cyan]⏳ Connecting to swarm and buffering media stream...[/bold cyan]")
-        buffer_threshold = 12 * 1024 * 1024  # 12 MB initial buffer
+        buffer_threshold = 15 * 1024 * 1024  # 15 MB initial buffer target
         media_path: Optional[Path] = None
 
+        def build_buffering_renderable(
+            name: str,
+            comp_len: int,
+            target_len: int,
+            dl_speed: int,
+            seeds: int,
+            peers: int,
+            header_ready: bool,
+        ) -> Group:
+            pct = (comp_len / target_len * 100.0) if target_len > 0 else 0.0
+            bar = render_progress_bar(min(100.0, pct), width=20)
+
+            table = Table(
+                title=f"⏳ Buffering Media Stream for Instant Playback: [bold white]{name}[/bold white]",
+                box=box.ROUNDED,
+                show_header=True,
+                header_style="bold cyan",
+                expand=True,
+            )
+            table.add_column("Buffer Progress", style="magenta", ratio=2)
+            table.add_column("Buffered / Target", justify="right", style="green", ratio=1)
+            table.add_column("Speed", justify="right", style="bold cyan", ratio=1)
+            table.add_column("Seeds/Peers", justify="center", style="yellow", ratio=1)
+            table.add_column("Header Status", justify="center", ratio=1)
+
+            header_status = (
+                "[bold green]✔ Container Ready[/bold green]"
+                if header_ready
+                else "[bold yellow]⏳ Waiting for Piece 0[/bold yellow]"
+            )
+
+            table.add_row(
+                bar,
+                f"{format_bytes(comp_len)} / {format_bytes(target_len)}",
+                f"{format_bytes(dl_speed)}/s" if dl_speed > 0 else "0 B/s",
+                f"SD: {seeds} | CN: {peers}",
+                header_status,
+            )
+
+            tip = Text.from_markup(
+                "  [dim]Prioritizing container header and initial stream chunks into disk buffer...[/dim]"
+            )
+            return Group(table, tip)
+
         try:
-            while True:
-                time.sleep(0.3)
-                try:
-                    status_data = client.tell_status(gid)
-                except Exception:
-                    continue
+            initial_renderable = build_buffering_renderable(
+                name="Connecting to Swarm...",
+                comp_len=0,
+                target_len=buffer_threshold,
+                dl_speed=0,
+                seeds=0,
+                peers=0,
+                header_ready=False,
+            )
+            with Live(initial_renderable, console=self.console, refresh_per_second=4, transient=True) as live:
+                while True:
+                    time.sleep(0.25)
+                    try:
+                        status_data = client.tell_status(gid)
+                    except Exception:
+                        continue
 
-                if status_data.get("followedBy"):
-                    gid = status_data["followedBy"][0]
-                    status_data = client.tell_status(gid)
+                    if status_data.get("followedBy"):
+                        gid = status_data["followedBy"][0]
+                        try:
+                            status_data = client.tell_status(gid)
+                        except Exception:
+                            pass
 
-                total_len = int(status_data.get("totalLength", 0))
-                comp_len = int(status_data.get("completedLength", 0))
-                dl_speed = int(status_data.get("downloadSpeed", 0))
-                seeds = int(status_data.get("numSeeders", 0))
-                peers = int(status_data.get("connections", 0))
-                files = status_data.get("files", [])
+                    status_str = status_data.get("status", "active")
+                    dl_speed = int(status_data.get("downloadSpeed", 0))
+                    seeds = int(status_data.get("numSeeders", 0))
+                    peers = int(status_data.get("connections", 0))
+                    files = status_data.get("files", [])
 
-                effective_target = min(buffer_threshold, total_len) if total_len > 0 else buffer_threshold
-                buf_percent = (comp_len / effective_target * 100.0) if effective_target > 0 else 0.0
-
-                buf_bar = render_progress_bar(min(100.0, buf_percent), width=20)
-                speed_str = f"{format_bytes(dl_speed)}/s" if dl_speed > 0 else "0 B/s"
-
-                self.console.print(
-                    f"\r  Buffering: {buf_bar}  "
-                    f"([green]{format_bytes(comp_len)}[/green] / [dim]{format_bytes(effective_target)}[/dim])  "
-                    f"Speed: [bold cyan]{speed_str}[/bold cyan]  "
-                    f"Seeds: [yellow]{seeds}[/yellow] | Peers: [dim]{peers}[/dim]   ",
-                    end="",
-                )
-
-                # Check if buffer threshold reached and file exists
-                if comp_len >= effective_target and files:
-                    # Discover largest media file
-                    candidates: List[Tuple[Path, int]] = []
+                    # Find target media file from files list
+                    target_file_info = None
+                    candidates: List[Dict[str, Any]] = []
                     for f in files:
-                        p = Path(f.get("path", ""))
-                        if p.suffix.lower() in MEDIA_EXTENSIONS and p.exists():
-                            candidates.append((p, f.get("length", 0)))
+                        p_str = f.get("path", "")
+                        if Path(p_str).suffix.lower() in MEDIA_EXTENSIONS:
+                            candidates.append(f)
 
                     if candidates:
-                        candidates.sort(key=lambda x: int(x[1]), reverse=True)
-                        media_path = candidates[0][0]
-                        break
+                        candidates.sort(key=lambda x: int(x.get("length", 0)), reverse=True)
+                        target_file_info = candidates[0]
 
-            self.console.print("\n")
-            if not media_path or not media_path.exists():
-                self.console.print("[bold red]Could not find media file to play.[/bold red]")
+                    if target_file_info:
+                        media_path = Path(target_file_info.get("path", ""))
+                        file_total = int(target_file_info.get("length", 0))
+                        file_comp = int(target_file_info.get("completedLength", 0))
+                        display_name = media_path.name
+                    else:
+                        bt_name = status_data.get("bittorrent", {}).get("info", {}).get("name")
+                        display_name = bt_name or "Resolving Metadata..."
+                        file_total = int(status_data.get("totalLength", 0))
+                        file_comp = int(status_data.get("completedLength", 0))
+
+                    effective_target = min(buffer_threshold, file_total) if file_total > 0 else buffer_threshold
+
+                    header_ready = False
+                    if media_path and media_path.exists():
+                        header_ready = is_media_header_valid(media_path)
+                        if header_ready:
+                            header_ready = can_demux_media(media_path)
+
+                    live.update(
+                        build_buffering_renderable(
+                            name=display_name,
+                            comp_len=file_comp,
+                            target_len=effective_target,
+                            dl_speed=dl_speed,
+                            seeds=seeds,
+                            peers=peers,
+                            header_ready=header_ready,
+                        )
+                    )
+
+                    # Ready to launch condition:
+                    # 1) Container header is verified valid and demuxable
+                    # 2) Initial buffer threshold reached (or file is small and completed)
+                    if media_path and header_ready:
+                        if file_comp >= effective_target or status_str == "complete" or (file_total > 0 and file_comp >= file_total):
+                            break
+
+                    if status_str == "error":
+                        err_msg = status_data.get("errorMessage", "Unknown aria2 error")
+                        self.console.print(f"\n[bold red]❌ Streaming encountered an error:[/bold red] {err_msg}")
+                        return 1
+
+            if not media_path or not media_path.exists() or not is_media_header_valid(media_path):
+                self.console.print("[bold red]Could not find or validate media file header to play.[/bold red]")
                 return 1
 
             self.console.print(f"🎬 [bold green]Launching {player.upper()} player:[/bold green] [bold white]{media_path.name}[/bold white]\n")
 
             # Spawn player while aria2c continues streaming in background
             if player == "mpv":
-                player_cmd = ["mpv", "--demuxer-readahead-secs=20", "--keep-open=yes", str(media_path)]
+                player_cmd = [
+                    "mpv",
+                    "--demuxer-readahead-secs=20",
+                    "--cache=yes",
+                    "--cache-secs=30",
+                    "--keep-open=yes",
+                    str(media_path),
+                ]
             else:
                 player_cmd = ["ffplay", "-autoexit", str(media_path)]
 
