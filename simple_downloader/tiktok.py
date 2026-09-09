@@ -153,6 +153,7 @@ class TikTokDownloader:
                 "music_url": music_url,
                 "is_direct": False,
                 "is_tiktok": True,
+                "thumbnail": raw.get("origin_cover") or raw.get("cover"),
                 "formats": formats,
             }
 

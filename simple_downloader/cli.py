@@ -162,13 +162,29 @@ def create_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--embed-thumbnail",
         action="store_true",
-        help="Embed thumbnail image into media file",
+        default=True,
+        help="Embed thumbnail / splash art image into media file (default: enabled)",
+    )
+    parser.add_argument(
+        "--no-thumbnail",
+        "--no-embed-thumbnail",
+        dest="embed_thumbnail",
+        action="store_false",
+        help="Do not embed thumbnail into media file",
     )
 
     parser.add_argument(
         "--embed-metadata",
         action="store_true",
-        help="Embed title, artist, and metadata tags",
+        default=True,
+        help="Embed title, artist, and metadata tags (default: enabled)",
+    )
+    parser.add_argument(
+        "--no-metadata",
+        "--no-embed-metadata",
+        dest="embed_metadata",
+        action="store_false",
+        help="Do not embed metadata tags",
     )
 
     parser.add_argument(
@@ -747,6 +763,8 @@ def _run_media_wizard(engine: DownloadEngine, url: str, force_audio: bool = Fals
         playlist_items=playlist_items,
         output_dir=out_dir,
         browser=browser,
+        embed_thumbnail=True,
+        embed_metadata=True,
     )
 
 
@@ -765,8 +783,8 @@ def do_download(
     subtitles: bool = False,
     sub_lang: str = "en",
     embed_subs: bool = False,
-    embed_thumbnail: bool = False,
-    embed_metadata: bool = False,
+    embed_thumbnail: bool = True,
+    embed_metadata: bool = True,
     playlist: bool = False,
     playlist_items: Optional[str] = None,
     browser: Optional[str] = None,

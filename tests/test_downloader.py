@@ -374,6 +374,117 @@ class TestCLIParser(unittest.TestCase):
             mock_wizard.assert_called_once_with(engine, "https://youtube.com/watch?v=123", force_audio=False)
 
 
+class TestUniversalSplashArt(unittest.TestCase):
+    """Test universal splash art attachment across platforms and formats."""
+
+    def setUp(self):
+        import tempfile
+        self.temp_dir = tempfile.mkdtemp(prefix="vdown_test_splash_")
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.temp_dir, ignore_errors=True)
+
+    def test_attach_splash_art_flac(self):
+        from unittest.mock import patch
+        from pathlib import Path
+        from simple_downloader.utils import attach_splash_art
+
+        media_file = Path(self.temp_dir) / "track.flac"
+        cover_file = Path(self.temp_dir) / "track.jpg"
+        media_file.write_bytes(b"dummy flac data")
+        cover_file.write_bytes(b"\xff\xd8\xff\xe0dummy jpeg")
+
+        with patch("subprocess.run") as mock_sub:
+            def side_effect(cmd, **kwargs):
+                if ".tmp.flac" in cmd[-1]:
+                    Path(cmd[-1]).write_bytes(b"muxed flac with cover")
+                mock_res = type("Result", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+                return mock_res
+            mock_sub.side_effect = side_effect
+
+            res = attach_splash_art(str(media_file), str(cover_file))
+            self.assertTrue(res)
+            self.assertFalse(cover_file.exists())
+
+    def test_attach_splash_art_mp3(self):
+        from unittest.mock import patch
+        from pathlib import Path
+        from simple_downloader.utils import attach_splash_art
+
+        media_file = Path(self.temp_dir) / "track.mp3"
+        cover_file = Path(self.temp_dir) / "track.jpg"
+        media_file.write_bytes(b"dummy mp3 data")
+        cover_file.write_bytes(b"\xff\xd8\xff\xe0dummy jpeg")
+
+        with patch("subprocess.run") as mock_sub:
+            def side_effect(cmd, **kwargs):
+                if ".tmp.mp3" in cmd[-1]:
+                    Path(cmd[-1]).write_bytes(b"muxed mp3 with cover")
+                mock_res = type("Result", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+                return mock_res
+            mock_sub.side_effect = side_effect
+
+            res = attach_splash_art(str(media_file), str(cover_file))
+            self.assertTrue(res)
+            self.assertFalse(cover_file.exists())
+
+    def test_attach_splash_art_wav(self):
+        from unittest.mock import patch
+        from pathlib import Path
+        from simple_downloader.utils import attach_splash_art
+
+        media_file = Path(self.temp_dir) / "track.wav"
+        cover_file = Path(self.temp_dir) / "track.jpg"
+        media_file.write_bytes(b"dummy wav data")
+        cover_file.write_bytes(b"\xff\xd8\xff\xe0dummy jpeg")
+
+        with patch("simple_downloader.utils.embed_wav_cover_art", return_value=True) as mock_embed:
+            res = attach_splash_art(str(media_file), str(cover_file))
+            self.assertTrue(res)
+            mock_embed.assert_called_once_with(str(media_file), str(cover_file))
+            self.assertFalse(cover_file.exists())
+
+    def test_attach_splash_art_finds_sibling_image(self):
+        from unittest.mock import patch
+        from pathlib import Path
+        from simple_downloader.utils import attach_splash_art
+
+        media_file = Path(self.temp_dir) / "song.flac"
+        cover_file = Path(self.temp_dir) / "song.jpg"
+        media_file.write_bytes(b"dummy flac data")
+        cover_file.write_bytes(b"\xff\xd8\xff\xe0dummy jpeg")
+
+        with patch("subprocess.run") as mock_sub:
+            def side_effect(cmd, **kwargs):
+                if ".tmp.flac" in cmd[-1]:
+                    Path(cmd[-1]).write_bytes(b"muxed flac")
+                mock_res = type("Result", (), {"returncode": 0, "stdout": "", "stderr": ""})()
+                return mock_res
+            mock_sub.side_effect = side_effect
+
+            res = attach_splash_art(str(media_file))
+            self.assertTrue(res)
+            self.assertFalse(cover_file.exists())
+
+    def test_attach_splash_art_nonexistent_file(self):
+        from simple_downloader.utils import attach_splash_art
+        self.assertFalse(attach_splash_art("/nonexistent/file.flac"))
+
+    def test_cli_parser_thumbnail_defaults_and_flags(self):
+        from simple_downloader.cli import create_parser
+        parser = create_parser()
+
+        args = parser.parse_args(["https://example.com/song"])
+        self.assertTrue(args.embed_thumbnail)
+        self.assertTrue(args.embed_metadata)
+
+        args_no_thumb = parser.parse_args(["https://example.com/song", "--no-thumbnail"])
+        self.assertFalse(args_no_thumb.embed_thumbnail)
+
+        args_no_meta = parser.parse_args(["https://example.com/song", "--no-metadata"])
+        self.assertFalse(args_no_meta.embed_metadata)
+
 
 class TestWebpageVideoScraper(unittest.TestCase):
     """Test webpage video scraper for embedded videos."""
@@ -554,10 +665,12 @@ class TestPlaylistAndAudioEngine(unittest.TestCase):
 
         self.assertIn("postprocessors", captured_opts)
         pps = captured_opts["postprocessors"]
-        self.assertEqual(len(pps), 1)
-        self.assertEqual(pps[0]["key"], "FFmpegExtractAudio")
-        self.assertEqual(pps[0]["preferredcodec"], "flac")
-        self.assertNotIn("preferredquality", pps[0])
+        extract_pps = [p for p in pps if p.get("key") == "FFmpegExtractAudio"]
+        self.assertEqual(len(extract_pps), 1)
+        self.assertEqual(extract_pps[0]["preferredcodec"], "flac")
+        self.assertNotIn("preferredquality", extract_pps[0])
+        self.assertTrue(any(p.get("key") == "FFmpegThumbnailsConvertor" for p in pps))
+        self.assertTrue(any(p.get("key") == "FFmpegMetadata" for p in pps))
 
     def test_engine_320k_mp3_postprocessor(self):
         from unittest.mock import patch, MagicMock
@@ -585,10 +698,12 @@ class TestPlaylistAndAudioEngine(unittest.TestCase):
 
         self.assertIn("postprocessors", captured_opts)
         pps = captured_opts["postprocessors"]
-        self.assertEqual(len(pps), 1)
-        self.assertEqual(pps[0]["key"], "FFmpegExtractAudio")
-        self.assertEqual(pps[0]["preferredcodec"], "mp3")
-        self.assertEqual(pps[0]["preferredquality"], "320")
+        extract_pps = [p for p in pps if p.get("key") == "FFmpegExtractAudio"]
+        self.assertEqual(len(extract_pps), 1)
+        self.assertEqual(extract_pps[0]["preferredcodec"], "mp3")
+        self.assertEqual(extract_pps[0]["preferredquality"], "320")
+        self.assertTrue(any(p.get("key") == "FFmpegThumbnailsConvertor" for p in pps))
+        self.assertTrue(any(p.get("key") == "FFmpegMetadata" for p in pps))
         self.assertIn("downloads", captured_opts.get("outtmpl", ""))
 
     def test_engine_playlist_options(self):

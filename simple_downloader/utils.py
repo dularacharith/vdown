@@ -1,9 +1,13 @@
 """Utility functions for simple-downloader."""
 
 import base64
+import os
 import re
+import shutil
 import struct
+import subprocess
 import urllib.parse
+from pathlib import Path
 from typing import Optional, Dict
 
 
@@ -222,3 +226,190 @@ def build_vorbis_picture_block(cover_path: str) -> Optional[str]:
         return base64.b64encode(block).decode("ascii")
     except Exception:
         return None
+
+
+def attach_splash_art(media_path: str, thumbnail_path: Optional[str] = None) -> bool:
+    """Attach/embed splash cover art into an audio or video file.
+
+    Supports:
+      - FLAC (.flac): Bit-perfect stream copy with attached_pic MJPEG
+      - MP3 (.mp3): Bit-perfect stream copy with ID3v2.3 APIC front cover
+      - WAV (.wav): Bit-perfect RIFF ID3v2 APIC chunk
+      - M4A / AAC (.m4a, .aac): Bit-perfect stream copy with attached_pic
+      - OPUS / OGG (.opus, .ogg): OggOpus metadata_block_picture via mutagen
+      - MP4 / M4V / MOV (.mp4, .m4v, .mov): MP4 container cover stream copy
+      - MKV (.mkv): Matroska cover attachment
+
+    Cleans up standalone intermediate thumbnail images upon successful embedding.
+    """
+    if not media_path or not os.path.exists(media_path):
+        return False
+
+    p = Path(media_path)
+    if p.is_dir():
+        return False
+
+    # If no thumbnail path given, find sibling image with same stem
+    if not thumbnail_path or not os.path.exists(thumbnail_path):
+        for ext in [".jpg", ".jpeg", ".png", ".webp"]:
+            candidate = p.with_suffix(ext)
+            if candidate.exists() and candidate != p:
+                thumbnail_path = str(candidate)
+                break
+
+    if not thumbnail_path or not os.path.exists(thumbnail_path):
+        return False
+
+    ext = p.suffix.lower()
+    thumb_path = Path(thumbnail_path)
+
+    # Ensure thumbnail is JPEG format for universal compatibility across media players
+    cover_jpg = thumbnail_path
+    temp_jpg = None
+    if thumb_path.suffix.lower() not in (".jpg", ".jpeg"):
+        temp_jpg = str(p.parent / f"{p.stem}_converted_cover.jpg")
+        conv_res = subprocess.run(
+            ["ffmpeg", "-y", "-i", thumbnail_path, "-frames:v", "1", temp_jpg],
+            capture_output=True,
+            text=True,
+        )
+        if conv_res.returncode == 0 and os.path.exists(temp_jpg):
+            cover_jpg = temp_jpg
+
+    success = False
+    try:
+        if ext == ".flac":
+            tmp_out = str(p.parent / f"{p.stem}.tmp.flac")
+            cmd = [
+                "ffmpeg", "-y", "-i", str(p), "-i", cover_jpg,
+                "-map", "0:a", "-map", "1:v",
+                "-c:a", "copy", "-c:v", "mjpeg",
+                "-disposition:v:0", "attached_pic",
+                tmp_out,
+            ]
+            res = subprocess.run(cmd, capture_output=True, text=True)
+            if res.returncode == 0 and os.path.exists(tmp_out) and os.path.getsize(tmp_out) > 0:
+                os.replace(tmp_out, str(p))
+                success = True
+            elif os.path.exists(tmp_out):
+                try:
+                    os.remove(tmp_out)
+                except Exception:
+                    pass
+
+        elif ext == ".mp3":
+            tmp_out = str(p.parent / f"{p.stem}.tmp.mp3")
+            cmd = [
+                "ffmpeg", "-y", "-i", str(p), "-i", cover_jpg,
+                "-map", "0:a", "-map", "1:v",
+                "-c:a", "copy", "-c:v", "mjpeg",
+                "-id3v2_version", "3",
+                "-metadata:s:v", "title=Album cover",
+                "-metadata:s:v", "comment=Cover (front)",
+                tmp_out,
+            ]
+            res = subprocess.run(cmd, capture_output=True, text=True)
+            if res.returncode == 0 and os.path.exists(tmp_out) and os.path.getsize(tmp_out) > 0:
+                os.replace(tmp_out, str(p))
+                success = True
+            elif os.path.exists(tmp_out):
+                try:
+                    os.remove(tmp_out)
+                except Exception:
+                    pass
+
+        elif ext == ".wav":
+            success = embed_wav_cover_art(str(p), cover_jpg)
+
+        elif ext in (".m4a", ".aac"):
+            tmp_out = str(p.parent / f"{p.stem}.tmp.m4a")
+            cmd = [
+                "ffmpeg", "-y", "-i", str(p), "-i", cover_jpg,
+                "-map", "0:a", "-map", "1:v",
+                "-c:a", "copy", "-c:v", "mjpeg",
+                "-disposition:v:0", "attached_pic",
+                tmp_out,
+            ]
+            res = subprocess.run(cmd, capture_output=True, text=True)
+            if res.returncode == 0 and os.path.exists(tmp_out) and os.path.getsize(tmp_out) > 0:
+                os.replace(tmp_out, str(p))
+                success = True
+            elif os.path.exists(tmp_out):
+                try:
+                    os.remove(tmp_out)
+                except Exception:
+                    pass
+
+        elif ext in (".opus", ".ogg"):
+            try:
+                from mutagen.oggopus import OggOpus
+                from mutagen.flac import Picture
+                audio = OggOpus(str(p))
+                pic = Picture()
+                with open(cover_jpg, "rb") as cf:
+                    pic.data = cf.read()
+                pic.type = 3
+                pic.mime = "image/jpeg"
+                pic.desc = "front cover"
+                audio["metadata_block_picture"] = [base64.b64encode(pic.write()).decode("ascii")]
+                audio.save()
+                success = True
+            except Exception:
+                pass
+
+        elif ext in (".mp4", ".m4v", ".mov"):
+            tmp_out = str(p.parent / f"{p.stem}.tmp.mp4")
+            cmd = [
+                "ffmpeg", "-y", "-i", str(p), "-i", cover_jpg,
+                "-map", "0", "-map", "1",
+                "-c", "copy",
+                "-disposition:v:1", "attached_pic",
+                tmp_out,
+            ]
+            res = subprocess.run(cmd, capture_output=True, text=True)
+            if res.returncode == 0 and os.path.exists(tmp_out) and os.path.getsize(tmp_out) > 0:
+                os.replace(tmp_out, str(p))
+                success = True
+            elif os.path.exists(tmp_out):
+                try:
+                    os.remove(tmp_out)
+                except Exception:
+                    pass
+
+        elif ext == ".mkv":
+            tmp_out = str(p.parent / f"{p.stem}.tmp.mkv")
+            cmd = [
+                "ffmpeg", "-y", "-i", str(p),
+                "-attach", cover_jpg,
+                "-metadata:s:t", "mimetype=image/jpeg",
+                "-metadata:s:t", "filename=cover.jpg",
+                "-c", "copy",
+                tmp_out,
+            ]
+            res = subprocess.run(cmd, capture_output=True, text=True)
+            if res.returncode == 0 and os.path.exists(tmp_out) and os.path.getsize(tmp_out) > 0:
+                os.replace(tmp_out, str(p))
+                success = True
+            elif os.path.exists(tmp_out):
+                try:
+                    os.remove(tmp_out)
+                except Exception:
+                    pass
+
+        # Cleanup standalone thumbnail file if embedding succeeded
+        if success:
+            if os.path.exists(thumbnail_path) and thumbnail_path != media_path:
+                try:
+                    os.remove(thumbnail_path)
+                except Exception:
+                    pass
+
+        return success
+
+    finally:
+        if temp_jpg and os.path.exists(temp_jpg):
+            try:
+                os.remove(temp_jpg)
+            except Exception:
+                pass
+

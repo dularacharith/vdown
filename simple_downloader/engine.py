@@ -4,6 +4,7 @@ import os
 import sys
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Tuple
+import requests
 import yt_dlp
 from rich.console import Console
 from rich.progress import (
@@ -27,6 +28,7 @@ from simple_downloader.utils import (
     format_bytes,
     format_duration,
     sanitize_filename,
+    attach_splash_art,
 )
 
 console = Console()
@@ -248,8 +250,8 @@ class DownloadEngine:
         subtitles: bool = False,
         sub_lang: str = "en",
         embed_subs: bool = False,
-        embed_thumbnail: bool = False,
-        embed_metadata: bool = False,
+        embed_thumbnail: bool = True,
+        embed_metadata: bool = True,
         playlist: bool = False,
         playlist_items: Optional[str] = None,
         browser: Optional[str] = None,
@@ -278,7 +280,7 @@ class DownloadEngine:
         if info and info.get("is_tiktok"):
             try:
                 tt = TikTokDownloader()
-                return tt.download(
+                res = tt.download(
                     info=info,
                     output_path=output_path,
                     output_dir=output_dir or "downloads",
@@ -288,6 +290,19 @@ class DownloadEngine:
                     rate_limit=rate_limit,
                     show_progress=show_progress,
                 )
+                if res and embed_thumbnail:
+                    if not attach_splash_art(res) and info.get("thumbnail"):
+                        try:
+                            p = Path(res)
+                            temp_thumb = str(p.parent / f"{p.stem}_remote_cover.jpg")
+                            resp = requests.get(info["thumbnail"], timeout=10)
+                            if resp.status_code == 200 and resp.content:
+                                with open(temp_thumb, "wb") as tf:
+                                    tf.write(resp.content)
+                                attach_splash_art(res, temp_thumb)
+                        except Exception:
+                            pass
+                return res
             except Exception as e:
                 self.console.print(f"[yellow]TikTok watermark-free download failed: {e}. Trying fallback...[/yellow]")
 
@@ -545,7 +560,7 @@ class DownloadEngine:
             ydl_opts["writethumbnail"] = True
             if "postprocessors" not in ydl_opts:
                 ydl_opts["postprocessors"] = []
-            ydl_opts["postprocessors"].append({"key": "EmbedThumbnail"})
+            ydl_opts["postprocessors"].append({"key": "FFmpegThumbnailsConvertor", "format": "jpg"})
         # Metadata embedding
         if embed_metadata:
             if "postprocessors" not in ydl_opts:
@@ -626,6 +641,30 @@ class DownloadEngine:
 
         ydl_opts["postprocessor_hooks"] = [ydl_postprocessor_hook]
 
+        def _attach_thumbnails():
+            if not embed_thumbnail:
+                return
+            targets = list(downloaded_files)
+            if last_file_downloaded and last_file_downloaded not in targets:
+                targets.append(last_file_downloaded)
+
+            for target in targets:
+                if not target or not os.path.exists(target) or os.path.isdir(target):
+                    continue
+                attached = attach_splash_art(target)
+                if not attached and info and info.get("thumbnail"):
+                    thumb_url = info["thumbnail"]
+                    try:
+                        p = Path(target)
+                        temp_thumb = str(p.parent / f"{p.stem}_remote_cover.jpg")
+                        resp = requests.get(thumb_url, timeout=10)
+                        if resp.status_code == 200 and resp.content:
+                            with open(temp_thumb, "wb") as tf:
+                                tf.write(resp.content)
+                            attach_splash_art(target, temp_thumb)
+                    except Exception:
+                        pass
+
         if show_progress:
             from simple_downloader.progress import create_download_progress
 
@@ -639,6 +678,7 @@ class DownloadEngine:
                         ret_code = ydl.download([url])
                         if ret_code != 0:
                             raise RuntimeError(f"Download failed with exit code {ret_code}")
+                _attach_thumbnails()
                 if playlist and downloaded_files:
                     if len(downloaded_files) > 1:
                         common_dir = os.path.dirname(downloaded_files[0])
@@ -691,6 +731,7 @@ class DownloadEngine:
         else:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                 ydl.download([url])
+            _attach_thumbnails()
             if playlist and downloaded_files:
                 if len(downloaded_files) > 1:
                     common_dir = os.path.dirname(downloaded_files[0])
