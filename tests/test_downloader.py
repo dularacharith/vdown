@@ -1716,6 +1716,62 @@ class TestTurboAndTorrentDownloader(unittest.TestCase):
         args_torrent = parser.parse_args(["magnet:?xt=urn:btih:123", "--torrent"])
         self.assertTrue(args_torrent.torrent)
 
+        args_stream = parser.parse_args(["magnet:?xt=urn:btih:123", "--stream", "--verbose"])
+        self.assertTrue(args_stream.stream)
+        self.assertTrue(args_stream.verbose)
+
+        args_play = parser.parse_args(["magnet:?xt=urn:btih:123", "--play"])
+        self.assertTrue(args_play.stream)
+
+    def test_render_progress_bar(self):
+        from simple_downloader.torrent import render_progress_bar
+
+        bar_0 = render_progress_bar(0.0)
+        self.assertIn("0.0%", bar_0)
+
+        bar_50 = render_progress_bar(50.0)
+        self.assertIn("50.0%", bar_50)
+        self.assertIn("█", bar_50)
+        self.assertIn("░", bar_50)
+
+        bar_100 = render_progress_bar(100.0)
+        self.assertIn("100.0%", bar_100)
+
+        # Clamping
+        bar_neg = render_progress_bar(-10.0)
+        self.assertIn("0.0%", bar_neg)
+        bar_over = render_progress_bar(150.0)
+        self.assertIn("100.0%", bar_over)
+
+    def test_find_free_port(self):
+        from simple_downloader.torrent import find_free_port
+
+        port = find_free_port()
+        self.assertIsInstance(port, int)
+        self.assertGreater(port, 1024)
+
+    def test_aria2_rpc_client(self):
+        import io
+        import json
+        from unittest.mock import patch, MagicMock
+        from simple_downloader.torrent import Aria2RpcClient
+
+        client = Aria2RpcClient(port=6800, secret="mytoken")
+        fake_response = json.dumps({
+            "jsonrpc": "2.0",
+            "id": "1",
+            "result": {"status": "active", "totalLength": "1000", "completedLength": "500"}
+        }).encode("utf-8")
+
+        mock_resp = MagicMock()
+        mock_resp.read.return_value = fake_response
+        mock_resp.__enter__.return_value = mock_resp
+
+        with patch("urllib.request.urlopen", return_value=mock_resp):
+            res = client.tell_status("mock_gid")
+            self.assertEqual(res["status"], "active")
+            self.assertEqual(res["totalLength"], "1000")
+
     def test_welcome_screen_and_diagnostics(self):
         from simple_downloader.cli import display_welcome_screen, ASCII_BANNER
         from unittest.mock import patch

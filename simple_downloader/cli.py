@@ -224,6 +224,20 @@ def create_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument(
+        "--stream",
+        "--play",
+        dest="stream",
+        action="store_true",
+        help="Stream / play torrent media directly in CLI (mpv) without waiting for full download",
+    )
+
+    parser.add_argument(
+        "--verbose",
+        action="store_true",
+        help="Display verbose logging during downloads",
+    )
+
+    parser.add_argument(
         "-v", "--version",
         action="version",
         version=f"vdown {__version__}",
@@ -365,7 +379,11 @@ def _run_interactive_mode_impl(engine: DownloadEngine, initial_url: Optional[str
                 if not ensure_tool_installed("aria2c", purpose="download torrents and magnet links at peer-to-peer speeds", console=console):
                     return 1
                 torrent_dl = TorrentDownloader(console)
-                torrent_dl.download(current_target)
+                console.print("\n[bold yellow]What would you like to do with this torrent?[/bold yellow]")
+                console.print("  [1] 📥 [bold cyan]Download to Disk[/bold cyan] (with live stats & pause/resume controls) [Default]")
+                console.print("  [2] ▶️ [bold magenta]Play / Stream Directly in CLI[/bold magenta] (instant playback via mpv)")
+                action_choice = Prompt.ask("Select an option", choices=["1", "2"], default="1")
+                torrent_dl.download(current_target, stream=(action_choice == "2"))
             else:
                 res = _run_media_wizard(engine, current_target)
                 if res == MEDIA_WIZARD_CANCELLED:
@@ -444,8 +462,12 @@ def _run_interactive_mode_impl(engine: DownloadEngine, initial_url: Optional[str
                 if not target or target.lower() in ("m", "menu", "b", "back"):
                     break
                 out_dir = Prompt.ask("Destination directory", default="downloads")
+                console.print("\n[bold yellow]What would you like to do with this torrent?[/bold yellow]")
+                console.print("  [1] 📥 [bold cyan]Download to Disk[/bold cyan] (with live stats & pause/resume controls) [Default]")
+                console.print("  [2] ▶️ [bold magenta]Play / Stream Directly in CLI[/bold magenta] (instant playback via mpv)")
+                action_choice = Prompt.ask("Select an option", choices=["1", "2"], default="1")
                 torrent_dl = TorrentDownloader(console)
-                torrent_dl.download(target, output_dir=out_dir)
+                torrent_dl.download(target, output_dir=out_dir, stream=(action_choice == "2"))
 
                 action = prompt_post_download_action(console, category_name="torrent or magnet link")
                 if action == "again":
@@ -946,12 +968,14 @@ def main(argv: Optional[List[str]] = None) -> int:
                 return 1
 
         # BitTorrent / Magnet mode
-        if getattr(args, "torrent", False) or is_torrent_or_magnet(args.url):
+        if getattr(args, "torrent", False) or getattr(args, "stream", False) or is_torrent_or_magnet(args.url):
             torrent_dl = TorrentDownloader(console)
             return torrent_dl.download(
                 args.url,
                 output_dir=args.output_dir,
                 connections=args.connections,
+                stream=getattr(args, "stream", False),
+                verbose=getattr(args, "verbose", False),
             )
 
         # Turbo Multi-Connection mode
