@@ -959,5 +959,65 @@ class TestTurboAndTorrentDownloader(unittest.TestCase):
             display_welcome_screen()
 
 
+class TestInstallerModule(unittest.TestCase):
+    """Unit tests for automated dependency installer."""
+
+    def test_detect_package_manager(self):
+        from simple_downloader.installer import detect_package_manager
+
+        mgr = detect_package_manager()
+        # On Arch Linux with pacman, it should detect pacman
+        if shutil.which("pacman"):
+            self.assertEqual(mgr, "pacman")
+        elif shutil.which("apt-get"):
+            self.assertEqual(mgr, "apt")
+
+    def test_get_install_command_for_tool(self):
+        from simple_downloader.installer import get_install_command_for_tool
+
+        cmd_args, cmd_str, mgr = get_install_command_for_tool("aria2c")
+        self.assertIsNotNone(cmd_str)
+        if mgr == "pacman":
+            self.assertEqual(cmd_args, ["sudo", "pacman", "-S", "--noconfirm", "aria2"])
+            self.assertEqual(cmd_str, "sudo pacman -S aria2")
+
+    def test_is_tool_installed(self):
+        from simple_downloader.installer import is_tool_installed
+
+        self.assertTrue(is_tool_installed("python3") or is_tool_installed("sh"))
+        self.assertFalse(is_tool_installed("non_existent_tool_12345"))
+
+    def test_ensure_tool_installed_when_already_installed(self):
+        from simple_downloader.installer import ensure_tool_installed
+        from unittest.mock import patch
+
+        with patch("simple_downloader.installer.is_tool_installed", return_value=True):
+            self.assertTrue(ensure_tool_installed("aria2c"))
+
+    def test_ensure_tool_installed_prompt_declined(self):
+        from simple_downloader.installer import ensure_tool_installed
+        from unittest.mock import patch
+
+        with patch("simple_downloader.installer.is_tool_installed", return_value=False), \
+             patch("sys.stdin.isatty", return_value=True), \
+             patch("rich.prompt.Confirm.ask", return_value=False):
+            res = ensure_tool_installed("aria2c")
+            self.assertFalse(res)
+
+    def test_ensure_tool_installed_prompt_accepted_success(self):
+        from simple_downloader.installer import ensure_tool_installed
+        from unittest.mock import patch, MagicMock
+
+        mock_proc = MagicMock()
+        mock_proc.returncode = 0
+
+        with patch("simple_downloader.installer.is_tool_installed", side_effect=[False, True]), \
+             patch("sys.stdin.isatty", return_value=True), \
+             patch("rich.prompt.Confirm.ask", return_value=True), \
+             patch("subprocess.run", return_value=mock_proc):
+            res = ensure_tool_installed("aria2c")
+            self.assertTrue(res)
+
+
 if __name__ == "__main__":
     unittest.main()

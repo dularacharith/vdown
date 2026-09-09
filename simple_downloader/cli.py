@@ -19,6 +19,7 @@ from simple_downloader.info import display_media_info, display_formats_table
 from simple_downloader.utils import parse_speed_limit, format_bytes
 from simple_downloader.turbo import TurboDownloader
 from simple_downloader.torrent import TorrentDownloader, is_torrent_or_magnet
+from simple_downloader.installer import ensure_tool_installed, is_tool_installed
 
 console = Console()
 
@@ -290,6 +291,27 @@ def display_system_diagnostics():
         table.add_row("Storage", "[cyan]Available[/cyan]", str(down_dir))
 
     console.print(table)
+
+    # Check for missing tools and offer automated installation
+    missing_tools = []
+    if not is_tool_installed("ffmpeg"):
+        missing_tools.append(("ffmpeg", "FFmpeg"))
+    if not is_tool_installed("aria2c"):
+        missing_tools.append(("aria2c", "aria2c"))
+
+    is_tty = sys.stdin.isatty() if hasattr(sys.stdin, "isatty") else False
+    if missing_tools and is_tty:
+        missing_names = ", ".join([name for _, name in missing_tools])
+        console.print(f"\n[bold yellow]⚡ Missing optional/recommended tools:[/bold yellow] [bold cyan]{missing_names}[/bold cyan]")
+        if Confirm.ask("Would you like to install missing tools automatically now?", default=True):
+            installed_any = False
+            for tool_key, _ in missing_tools:
+                if ensure_tool_installed(tool_key, console=console):
+                    installed_any = True
+            if installed_any:
+                display_system_diagnostics()
+                return
+
     Prompt.ask("\n[dim]Press Enter to return to main menu...[/dim]", default="")
 
 
@@ -298,6 +320,8 @@ def _run_interactive_mode_impl(engine: DownloadEngine, initial_url: Optional[str
     if initial_url:
         target = initial_url.strip().strip("'\"")
         if is_torrent_or_magnet(target):
+            if not ensure_tool_installed("aria2c", purpose="download torrents and magnet links at peer-to-peer speeds", console=console):
+                return 1
             torrent_dl = TorrentDownloader(console)
             return torrent_dl.download(target)
         return _run_media_wizard(engine, target)
@@ -340,6 +364,13 @@ def _run_interactive_mode_impl(engine: DownloadEngine, initial_url: Optional[str
             return 0
 
         elif choice == "2":
+            # Validate aria2c BEFORE asking for the magnet link / torrent file!
+            if not ensure_tool_installed(
+                "aria2c",
+                purpose="download torrents and magnet links at unthrottled peer-to-peer speeds",
+                console=console,
+            ):
+                continue
             target = Prompt.ask("\n[bold yellow]Paste magnet link (magnet:?...) or path to .torrent file[/bold yellow]")
             target = target.strip().strip("'\"")
             if not target:
@@ -349,6 +380,12 @@ def _run_interactive_mode_impl(engine: DownloadEngine, initial_url: Optional[str
             return torrent_dl.download(target, output_dir=out_dir)
 
         elif choice == "3":
+            if not ensure_tool_installed(
+                "ffmpeg",
+                purpose="download, merge, and convert video streams",
+                console=console,
+            ):
+                continue
             url = Prompt.ask("\n[bold yellow]Paste video or stream link (YouTube, TikTok, IG, FB, Web)[/bold yellow]")
             url = url.strip().strip("'\"")
             if not url:
@@ -356,6 +393,12 @@ def _run_interactive_mode_impl(engine: DownloadEngine, initial_url: Optional[str
             return _run_media_wizard(engine, url, force_audio=False)
 
         elif choice == "4":
+            if not ensure_tool_installed(
+                "ffmpeg",
+                purpose="extract and convert studio-quality audio (FLAC, MP3, WAV)",
+                console=console,
+            ):
+                continue
             url = Prompt.ask("\n[bold yellow]Paste song, album, playlist or video link (Spotify, YouTube, etc.)[/bold yellow]")
             url = url.strip().strip("'\"")
             if not url:

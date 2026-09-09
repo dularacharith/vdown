@@ -19,6 +19,7 @@ from rich.table import Table
 from rich.prompt import Confirm
 
 from simple_downloader.utils import format_bytes, sanitize_filename
+from simple_downloader.installer import ensure_tool_installed, is_tool_installed, get_install_command_for_tool
 
 
 def is_torrent_or_magnet(target: str) -> bool:
@@ -191,32 +192,16 @@ class TorrentDownloader:
 
     def has_aria2c(self) -> bool:
         """Check if aria2c executable is installed and reachable."""
-        return shutil.which("aria2c") is not None
+        return is_tool_installed("aria2c")
 
     def display_missing_aria2_prompt(self) -> bool:
-        """Inform the user that aria2c is required for BitTorrent P2P downloads."""
-        install_cmd = get_aria2_install_command()
-        self.console.print(
-            Panel(
-                f"[bold yellow]⚡ BitTorrent P2P Engine Required[/bold yellow]\n\n"
-                f"To download torrents and magnet links at unthrottled peer-to-peer speeds,\n"
-                f"[bold cyan]aria2c[/bold cyan] is required.\n\n"
-                f"Install it with one command:\n"
-                f"  [bold green]{install_cmd}[/bold green]",
-                title="[bold red]aria2c Not Found[/bold red]",
-                border_style="yellow",
-            )
+        """Inform the user that aria2c is required for BitTorrent P2P downloads and prompt to install."""
+        return ensure_tool_installed(
+            "aria2c",
+            purpose="download torrents and magnet links at unthrottled peer-to-peer speeds",
+            console=self.console,
+            interactive=True,
         )
-
-        if platform.system().lower() == "linux" and (os.path.exists("/etc/arch-release") or os.path.exists("/usr/share/omarchy")):
-            if Confirm.ask("Would you like to install aria2 now with sudo pacman?", default=False):
-                try:
-                    res = subprocess.run(["sudo", "pacman", "-S", "--noconfirm", "aria2"])
-                    return res.returncode == 0
-                except Exception as e:
-                    self.console.print(f"[red]Installation failed:[/red] {e}")
-                    return False
-        return False
 
     def download(
         self,
@@ -225,6 +210,11 @@ class TorrentDownloader:
         connections: int = 16,
     ) -> int:
         """Download a magnet link or .torrent file with unthrottled P2P speed."""
+        # Check for aria2c before downloading
+        if not self.has_aria2c():
+            if not self.display_missing_aria2_prompt():
+                return 1
+
         target_clean = target.strip().strip("'\"")
         dest_dir = Path(output_dir or "downloads").expanduser().resolve()
         dest_dir.mkdir(parents=True, exist_ok=True)
@@ -260,12 +250,6 @@ class TorrentDownloader:
                 )
             except Exception as e:
                 self.console.print(f"[dim]Note: could not parse torrent metadata: {e}[/dim]")
-
-        # Check for aria2c
-        if not self.has_aria2c():
-            installed = self.display_missing_aria2_prompt()
-            if not installed and not self.has_aria2c():
-                return 1
 
         # Run aria2c
         aria_cmd = [
