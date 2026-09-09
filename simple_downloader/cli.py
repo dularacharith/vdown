@@ -22,6 +22,7 @@ from simple_downloader.torrent import TorrentDownloader, is_torrent_or_magnet
 from simple_downloader.installer import ensure_tool_installed, is_tool_installed
 from simple_downloader.series import (
     SeriesDownloader,
+    EpisodeStreamPlayer,
     is_series_url,
     get_series_extractor,
     parse_episode_selection,
@@ -247,7 +248,7 @@ def create_parser() -> argparse.ArgumentParser:
         "--play",
         dest="stream",
         action="store_true",
-        help="Stream / play torrent media directly in CLI (mpv) without waiting for full download",
+        help="Stream / play torrent or series episode media directly in CLI (mpv) without waiting for full download",
     )
 
     parser.add_argument(
@@ -665,15 +666,41 @@ def _run_series_wizard(engine: DownloadEngine, url: str, series_obj: Optional[An
 
     console.print(table)
 
-    console.print("\n[bold yellow]Select download mode:[/bold yellow]")
+    console.print("\n[bold yellow]What would you like to do with this show / series?[/bold yellow]")
     console.print(f"  [1] 📥 [bold cyan]Download Entire Show[/bold cyan] ({series_obj.total_episodes} episodes) [Default]")
-    console.print("  [2] 🔢 [bold green]Select Episode Range[/bold green] (e.g. 1-5, S01E01-S01E06, S01)")
+    console.print("  [2] 🔢 [bold green]Select Episode Range to Download[/bold green] (e.g. 1-5, S01E01-S01E06, S01)")
     console.print("  [3] 🎯 [bold magenta]Download Single Episode[/bold magenta]")
-    console.print("  [4] ↩️ Back to Main Menu")
+    console.print("  [4] ▶️ [bold yellow]Watch / Stream Episode in CLI[/bold yellow] (instant playback via mpv)")
+    console.print("  [5] ↩️ Back to Main Menu")
 
-    mode_choice = Prompt.ask("Choice", choices=["1", "2", "3", "4"], default="1")
-    if mode_choice == "4":
+    mode_choice = Prompt.ask("Choice", choices=["1", "2", "3", "4", "5"], default="1")
+    if mode_choice == "5":
         return MEDIA_WIZARD_CANCELLED
+
+    if mode_choice == "4":
+        if len(all_eps) == 1:
+            target_ep = all_eps[0]
+        elif len(all_eps) <= 25:
+            console.print("\n[bold cyan]Available Episodes to Watch:[/bold cyan]")
+            for idx, ep in enumerate(all_eps, start=1):
+                console.print(f"  [{idx}] {ep.formatted_title()}")
+            ep_idx_str = Prompt.ask(f"Select episode number to watch (1-{len(all_eps)})", default="1")
+            try:
+                ep_idx = int(ep_idx_str)
+                target_ep = all_eps[ep_idx - 1]
+            except (ValueError, IndexError):
+                target_ep = all_eps[0]
+        else:
+            ep_input = Prompt.ask("Enter episode number or code to watch (e.g. 1 or S01E02)", default="1")
+            matched_eps = parse_episode_selection(ep_input, all_eps)
+            target_ep = matched_eps[0] if matched_eps else all_eps[0]
+
+        out_dir = Prompt.ask("Destination directory", default="downloads")
+        player = EpisodeStreamPlayer(series=series_obj, episode=target_ep, console=console)
+        return player.play(
+            output_dir=out_dir,
+            browser=browser,
+        )
 
     selected_episodes = all_eps
     if mode_choice == "2":
@@ -1115,7 +1142,7 @@ def main(argv: Optional[List[str]] = None) -> int:
                 return 1
 
         # BitTorrent / Magnet mode
-        if getattr(args, "torrent", False) or getattr(args, "stream", False) or is_torrent_or_magnet(args.url):
+        if getattr(args, "torrent", False) or is_torrent_or_magnet(args.url):
             torrent_dl = TorrentDownloader(console)
             return torrent_dl.download(
                 args.url,
@@ -1152,6 +1179,20 @@ def main(argv: Optional[List[str]] = None) -> int:
                 series_obj = extractor.extract_series(args.url, browser=args.browser, cookie_file=args.cookie_file)
             episodes_filter = getattr(args, "episodes", None) or args.playlist_items or "all"
             selected_eps = parse_episode_selection(episodes_filter, series_obj.all_episodes)
+
+            if getattr(args, "stream", False):
+                target_ep = selected_eps[0] if selected_eps else (series_obj.all_episodes[0] if series_obj.all_episodes else None)
+                if not target_ep:
+                    console.print("[bold red]No episode found to stream.[/bold red]")
+                    return 1
+                player = EpisodeStreamPlayer(series=series_obj, episode=target_ep, console=console)
+                return player.play(
+                    output_dir=args.output_dir or "downloads",
+                    browser=args.browser,
+                    cookie_file=args.cookie_file,
+                    quality=args.quality,
+                )
+
             series_dl = SeriesDownloader(console=console)
             return series_dl.download_series(
                 series=series_obj,
@@ -1200,6 +1241,30 @@ def main(argv: Optional[List[str]] = None) -> int:
         )
         playlist = (args.playlist or is_pure_playlist or bool(args.playlist_items)) and not args.no_playlist
         audio_only = args.audio_only or is_spotify or is_tidal or is_apple
+
+        if getattr(args, "stream", False):
+            player = "mpv" if is_tool_installed("mpv") else ("ffplay" if is_tool_installed("ffplay") else None)
+            if not player:
+                if not ensure_tool_installed("mpv", purpose="stream video directly in CLI", console=console):
+                    return 1
+                player = "mpv"
+            if player == "mpv":
+                player_cmd = [
+                    "mpv",
+                    "--title=" + (args.url or "Video Stream"),
+                    "--demuxer-readahead-secs=20",
+                    "--cache=yes",
+                    "--cache-secs=30",
+                    "--keep-open=yes",
+                ]
+                if args.browser:
+                    player_cmd.append(f"--ytdl-raw-options=cookies-from-browser={args.browser}")
+                if args.cookie_file:
+                    player_cmd.append(f"--cookies-file={args.cookie_file}")
+                player_cmd.append(args.url)
+            else:
+                player_cmd = ["ffplay", "-autoexit", args.url]
+            return subprocess.run(player_cmd).returncode
 
         return do_download(
             engine=engine,

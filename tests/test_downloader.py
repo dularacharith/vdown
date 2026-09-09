@@ -2180,6 +2180,164 @@ class TestSeriesAndShowDownloader(unittest.TestCase):
             self.assertEqual(exit_code, 0)
             mock_dl.assert_called_once()
 
+    def test_episode_stream_player_direct_stream(self):
+        from simple_downloader.series import Series, Episode, EpisodeStreamPlayer
+        from unittest.mock import patch, MagicMock
+
+        ep = Episode(
+            show_title="Test Series",
+            season_number=1,
+            episode_number=2,
+            title="The Clue",
+            stream_url="https://stream.example.com/live.m3u8",
+            headers={"Referer": "https://example.com/"},
+        )
+        series = Series(
+            title="Test Series",
+            url="https://example.com/series",
+            seasons={1: [ep]},
+        )
+
+        player = EpisodeStreamPlayer(series=series, episode=ep)
+        mock_res = MagicMock()
+        mock_res.returncode = 0
+
+        with patch("simple_downloader.series.is_tool_installed", side_effect=lambda t: t == "mpv"), \
+             patch("subprocess.run", return_value=mock_res) as mock_run, \
+             patch("simple_downloader.series.get_series_extractor") as mock_get_ext:
+            mock_extractor = MagicMock()
+            mock_extractor.resolve_stream.return_value = ("https://stream.example.com/live.m3u8", {"Referer": "https://example.com/"})
+            mock_get_ext.return_value = mock_extractor
+
+            res = player.play(output_dir="/tmp/test_stream_out", interactive=False)
+            self.assertEqual(res, 0)
+            mock_run.assert_called_once()
+            cmd = mock_run.call_args[0][0]
+            self.assertEqual(cmd[0], "mpv")
+            self.assertIn("--referrer=https://example.com/", cmd)
+            self.assertIn("https://stream.example.com/live.m3u8", cmd)
+            self.assertTrue(any("Test Series - S01E02 - The Clue" in arg for arg in cmd))
+
+    def test_episode_stream_player_existing_file(self):
+        import tempfile
+        import shutil
+        from pathlib import Path
+        from simple_downloader.series import Series, Episode, EpisodeStreamPlayer
+        from unittest.mock import patch, MagicMock
+
+        temp_dir = tempfile.mkdtemp(prefix="test_existing_ep_")
+        try:
+            ep = Episode(
+                show_title="Saved Show",
+                season_number=1,
+                episode_number=1,
+                title="Pilot",
+            )
+            series = Series(
+                title="Saved Show",
+                url="https://example.com/saved",
+                seasons={1: [ep]},
+            )
+
+            # Create existing file
+            ep_dir = Path(temp_dir) / "Saved Show" / "Season 01"
+            ep_dir.mkdir(parents=True, exist_ok=True)
+            saved_file = ep_dir / ep.safe_filename("mp4")
+            saved_file.write_bytes(b"\x00" * 1024)
+
+            player = EpisodeStreamPlayer(series=series, episode=ep)
+            mock_res = MagicMock()
+            mock_res.returncode = 0
+
+            with patch("simple_downloader.series.is_tool_installed", side_effect=lambda t: t == "mpv"), \
+                 patch("subprocess.run", return_value=mock_res) as mock_run:
+                res = player.play(output_dir=temp_dir, interactive=False)
+                self.assertEqual(res, 0)
+                mock_run.assert_called_once()
+                cmd = mock_run.call_args[0][0]
+                self.assertEqual(cmd[0], "mpv")
+                self.assertIn(str(saved_file), cmd)
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_episode_stream_player_drm_fallback(self):
+        import tempfile
+        import shutil
+        from simple_downloader.series import Series, Episode, EpisodeStreamPlayer
+        from unittest.mock import patch
+
+        temp_dir = tempfile.mkdtemp(prefix="test_drm_play_")
+        try:
+            ep = Episode(
+                show_title="Dark Drama",
+                season_number=1,
+                episode_number=1,
+                title="Chapter 1",
+                drm_protected=True,
+            )
+            series = Series(
+                title="Dark Drama",
+                url="https://netflix.com/title/999",
+                seasons={1: [ep]},
+                drm_protected=True,
+            )
+
+            player = EpisodeStreamPlayer(series=series, episode=ep)
+            with patch("simple_downloader.series.is_tool_installed", side_effect=lambda t: t == "mpv"), \
+                 patch("simple_downloader.series.SeriesDownloader._search_torrent_magnet", return_value="magnet:?xt=urn:btih:fakehash"), \
+                 patch("simple_downloader.torrent.TorrentStreamPlayer.run", return_value=0) as mock_stream_run:
+                res = player.play(output_dir=temp_dir, interactive=False)
+                self.assertEqual(res, 0)
+                mock_stream_run.assert_called_once()
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_interactive_series_wizard_stream_option(self):
+        from simple_downloader.cli import _run_series_wizard
+        from simple_downloader.series import Series, Episode
+        from unittest.mock import patch
+
+        ep1 = Episode(show_title="Test Series", season_number=1, episode_number=1, title="Ep 1")
+        series = Series(
+            title="Test Series",
+            url="https://roopahala.com.au/new/content/88/movie",
+            seasons={1: [ep1]},
+        )
+
+        prompt_responses = [
+            "4",          # Option 4: Watch / Stream Episode in CLI
+            "downloads",  # Destination dir
+        ]
+
+        with patch("simple_downloader.cli.EpisodeStreamPlayer.play", return_value=0) as mock_play, \
+             patch("rich.prompt.Confirm.ask", return_value=False), \
+             patch("rich.prompt.Prompt.ask", side_effect=prompt_responses), \
+             patch("rich.console.Console.print"):
+            res = _run_series_wizard(engine=None, url=series.url, series_obj=series)
+            self.assertEqual(res, 0)
+            mock_play.assert_called_once()
+
+    def test_cli_series_play_flag(self):
+        from simple_downloader.cli import main
+        from unittest.mock import patch, MagicMock
+        from simple_downloader.series import Series, Episode
+
+        ep1 = Episode(show_title="Stream Show", season_number=1, episode_number=1, title="Ep 1")
+        series = Series(
+            title="Stream Show",
+            url="https://roopahala.com.au/new/content/77/movie",
+            seasons={1: [ep1]},
+        )
+
+        mock_extractor = MagicMock()
+        mock_extractor.extract_series.return_value = series
+
+        with patch("simple_downloader.cli.get_series_extractor", return_value=mock_extractor), \
+             patch("simple_downloader.cli.EpisodeStreamPlayer.play", return_value=0) as mock_play:
+            exit_code = main(["https://roopahala.com.au/new/content/77/movie", "--play", "--episodes", "1"])
+            self.assertEqual(exit_code, 0)
+            mock_play.assert_called_once()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -35,8 +35,8 @@ from rich.progress import (
 from rich.prompt import Prompt, Confirm
 from rich.table import Table
 
-from simple_downloader.installer import ensure_tool_installed
-from simple_downloader.torrent import TorrentDownloader
+from simple_downloader.installer import ensure_tool_installed, is_tool_installed
+from simple_downloader.torrent import TorrentDownloader, TorrentStreamPlayer
 from simple_downloader.utils import (
     format_bytes,
     format_duration,
@@ -1035,6 +1035,30 @@ class SeriesDownloader:
         )
         return 0 if failed_count == 0 else 1
 
+    def stream_episode(
+        self,
+        series: Series,
+        episode: Episode,
+        output_dir: str = "downloads",
+        browser: Optional[str] = None,
+        cookie_file: Optional[str] = None,
+        quality: str = "best",
+        interactive: bool = True,
+    ) -> int:
+        """Stream an episode directly in the CLI using EpisodeStreamPlayer."""
+        player = EpisodeStreamPlayer(
+            series=series,
+            episode=episode,
+            console=self.console,
+        )
+        return player.play(
+            output_dir=output_dir,
+            browser=browser,
+            cookie_file=cookie_file,
+            quality=quality,
+            interactive=interactive,
+        )
+
     def _download_stream_with_ytdlp(
         self,
         stream_url: str,
@@ -1210,3 +1234,219 @@ class SeriesDownloader:
         except Exception:
             pass
         return None
+
+
+# ---------------------------------------------------------------------------
+# Episode Stream Player Engine (CLI Playback via mpv / ffplay)
+# ---------------------------------------------------------------------------
+
+class EpisodeStreamPlayer:
+    """Streams TV series and online streaming episodes directly inside the CLI (via mpv / ffplay).
+
+    Supports:
+    - Pre-downloaded file detection and immediate local playback.
+    - Automatic DRM fallback: discovers HD torrent swarm releases and streams sequentially via TorrentStreamPlayer.
+    - Direct HLS (.m3u8) and web stream playback with custom HTTP headers, cookies, and cache readahead.
+    - Post-playback prompt to save/download the episode permanently to disk with embedded splash art.
+    """
+
+    def __init__(
+        self,
+        series: Series,
+        episode: Episode,
+        connections: int = 16,
+        console_instance: Optional[Console] = None,
+        console: Optional[Console] = None,
+    ):
+        self.series = series
+        self.episode = episode
+        self.connections = connections
+        self.console = console or console_instance or Console()
+
+    def play(
+        self,
+        output_dir: str = "downloads",
+        browser: Optional[str] = None,
+        cookie_file: Optional[str] = None,
+        quality: str = "best",
+        interactive: bool = True,
+    ) -> int:
+        """Stream the episode directly to the media player."""
+        # 1. Verify media player availability
+        player = "mpv" if is_tool_installed("mpv") else ("ffplay" if is_tool_installed("ffplay") else None)
+        if not player:
+            if not ensure_tool_installed(
+                "mpv",
+                purpose="stream and watch episodes directly in the CLI",
+                console=self.console,
+                interactive=interactive,
+            ):
+                return 1
+            player = "mpv"
+
+        clean_show = sanitize_filename(self.series.title)
+        season_dir = Path(output_dir) / clean_show / f"Season {self.episode.season_number:02d}"
+
+        # 2. Check if the episode is already downloaded locally
+        existing_file = self._find_existing_episode_file(season_dir)
+        if existing_file and existing_file.exists() and existing_file.stat().st_size > 0:
+            self.console.print(
+                f"\n✨ [bold green]Found existing complete episode on disk:[/bold green] "
+                f"[bold white]{existing_file.name}[/bold white]"
+            )
+            self.console.print(f"🎬 [bold green]Launching {player.upper()} player immediately...[/bold green]\n")
+            if player == "mpv":
+                player_cmd = [
+                    "mpv",
+                    f"--title={self.series.title} - {self.episode.formatted_title()}",
+                    "--demuxer-readahead-secs=20",
+                    "--cache=yes",
+                    "--cache-secs=30",
+                    "--keep-open=yes",
+                    str(existing_file),
+                ]
+            else:
+                player_cmd = ["ffplay", "-autoexit", "-window_title", f"{self.series.title} - {self.episode.formatted_title()}", str(existing_file)]
+
+            subprocess.run(player_cmd)
+            return 0
+
+        # 3. DRM-Protected Content: Automatic Torrent Swarm Streaming Fallback
+        if self.episode.drm_protected or self.series.drm_protected:
+            return self._stream_drm_episode(season_dir=season_dir, interactive=interactive)
+
+        # 4. Direct Web / HLS Stream Resolution
+        extractor = get_series_extractor(self.series.url)
+        with self.console.status("[cyan]Resolving direct media stream for CLI playback...[/cyan]"):
+            try:
+                stream_url, headers = extractor.resolve_stream(
+                    self.episode,
+                    browser=browser,
+                    cookie_file=cookie_file,
+                )
+            except Exception:
+                stream_url = None
+                headers = {}
+
+        target_url = stream_url or self.episode.stream_url or self.episode.url
+        if not target_url:
+            self.console.print(f"[bold red]❌ Unable to resolve stream URL for {self.episode.formatted_title()}.[/bold red]")
+            return 1
+
+        active_headers = headers or self.episode.headers or {}
+
+        # 5. Build and execute player command
+        if player == "mpv":
+            player_cmd = [
+                "mpv",
+                f"--title={self.series.title} - {self.episode.formatted_title()}",
+                "--demuxer-readahead-secs=20",
+                "--cache=yes",
+                "--cache-secs=30",
+                "--keep-open=yes",
+            ]
+            if active_headers:
+                if "Referer" in active_headers:
+                    player_cmd.append(f"--referrer={active_headers['Referer']}")
+                if "User-Agent" in active_headers:
+                    player_cmd.append(f"--user-agent={active_headers['User-Agent']}")
+                extra_headers = [f"{k}: {v}" for k, v in active_headers.items() if k not in ("Referer", "User-Agent")]
+                if extra_headers:
+                    player_cmd.append(f"--http-header-fields={','.join(extra_headers)}")
+            if cookie_file:
+                player_cmd.append(f"--cookies-file={cookie_file}")
+            if browser:
+                player_cmd.append(f"--ytdl-raw-options=cookies-from-browser={browser}")
+            player_cmd.append(target_url)
+        else:
+            player_cmd = ["ffplay", "-autoexit", "-window_title", f"{self.series.title} - {self.episode.formatted_title()}"]
+            if active_headers:
+                header_str = "".join([f"{k}: {v}\r\n" for k, v in active_headers.items()])
+                player_cmd.extend(["-headers", header_str])
+            player_cmd.append(target_url)
+
+        self.console.print(
+            Panel(
+                f"[bold cyan]Show:[/bold cyan] [bold white]{self.series.title}[/bold white]\n"
+                f"[bold cyan]Episode:[/bold cyan] [bold yellow]{self.episode.formatted_title()}[/bold yellow]\n"
+                f"[dim]Platform:[/dim] {self.series.platform_name} | [dim]Player:[/dim] [bold green]{player.upper()}[/bold green]\n"
+                f"[dim]Stream:[/dim] [underline]{target_url[:80] + '...' if len(target_url) > 80 else target_url}[/underline]\n\n"
+                f"🎮 [bold white]Playback Controls:[/bold white] [dim][Space] Pause/Play | [←/→] Seek 5s | [↑/↓] Seek 60s | [9/0] Volume | [q] Quit[/dim]",
+                title="🎬 Streaming Episode in CLI",
+                border_style="bright_blue",
+            )
+        )
+
+        try:
+            ret = subprocess.run(player_cmd).returncode
+        except KeyboardInterrupt:
+            self.console.print("\n[bold yellow]👋 Playback cancelled by user.[/bold yellow]")
+            return 130
+
+        # 6. Post-playback action (like for a torrent)
+        if interactive and sys.stdin.isatty():
+            self.console.print(f"\n[bold cyan]Playback concluded for {self.episode.formatted_title()}.[/bold cyan]")
+            self.console.print("  [1] ↩️ [bold green]Return to Menu[/bold green] [Default]")
+            self.console.print("  [2] 📥 [bold cyan]Download & Save Episode to Disk[/bold cyan] (with splash art)")
+            post_choice = Prompt.ask("Select an option", choices=["1", "2"], default="1")
+            if post_choice == "2":
+                series_dl = SeriesDownloader(console=self.console)
+                return series_dl.download_series(
+                    series=self.series,
+                    episodes=[self.episode],
+                    output_dir=output_dir,
+                    quality=quality,
+                    browser=browser,
+                    cookie_file=cookie_file,
+                    embed_thumbnail=True,
+                )
+
+        return ret
+
+    def _find_existing_episode_file(self, season_dir: Path) -> Optional[Path]:
+        """Search season directory for an already completed episode file."""
+        if not season_dir.exists():
+            return None
+        target_name = self.episode.safe_filename("mp4")
+        direct = season_dir / target_name
+        if direct.exists():
+            return direct
+        ep_code = f"s{self.episode.season_number:02d}e{self.episode.episode_number:02d}"
+        for cand in season_dir.glob("*.*"):
+            if cand.suffix.lower() in (".mp4", ".mkv", ".webm", ".ts") and not cand.name.endswith(".part"):
+                if ep_code in cand.name.lower():
+                    return cand
+        return None
+
+    def _stream_drm_episode(self, season_dir: Path, interactive: bool = True) -> int:
+        """Stream DRM-protected episode using unencrypted torrent swarm fallback."""
+        self.console.print(
+            Panel(
+                f"[bold yellow]🔒 DRM Protected Stream Detected[/bold yellow]\n"
+                f"[dim]Title:[/dim] [bold white]{self.episode.formatted_title()}[/bold white]\n"
+                f"Direct browser video stream is encrypted with Widevine DRM (L1/L3).\n"
+                f"🚀 [bold cyan]vdown Automated Fallback:[/bold cyan] Searching unencrypted high-definition BitTorrent P2P swarms...",
+                border_style="yellow",
+            )
+        )
+
+        query = f"{self.episode.show_title} S{self.episode.season_number:02d}E{self.episode.episode_number:02d}"
+        downloader = SeriesDownloader(console=self.console)
+        magnet_url = downloader._search_torrent_magnet(query)
+        if not magnet_url:
+            self.console.print(
+                f"[yellow]No unencrypted swarm release automatically found for query: '{query}'.[/yellow]\n"
+                f"[dim]Tip: Pass browser cookies or download via manual magnet link.[/dim]"
+            )
+            return 1
+
+        self.console.print(f"[bold green]✔ High-speed release located for {query}![/bold green]")
+        season_dir.mkdir(parents=True, exist_ok=True)
+        streamer = TorrentStreamPlayer(
+            target=magnet_url,
+            dest_dir=season_dir,
+            connections=self.connections,
+            console=self.console,
+        )
+        return streamer.run()
+
