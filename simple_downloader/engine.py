@@ -20,6 +20,7 @@ from simple_downloader.direct_downloader import DirectDownloader
 from simple_downloader.scraper import WebpageVideoScraper
 from simple_downloader.tiktok import TikTokDownloader, is_tiktok_url
 from simple_downloader.spotify import SpotifyDownloader, is_spotify_url
+from simple_downloader.tidal import TidalDownloader, is_tidal_url
 from simple_downloader.utils import (
     is_direct_media_url,
     format_bytes,
@@ -66,6 +67,16 @@ class DownloadEngine:
                 sp_info = sp.get_info(url)
                 if sp_info:
                     return sp_info
+            except Exception:
+                pass
+
+        # Specialized TIDAL handler (tracks, albums, playlists)
+        if is_tidal_url(url):
+            try:
+                td = TidalDownloader(console=self.console)
+                td_info = td.get_info(url)
+                if td_info:
+                    return td_info
             except Exception:
                 pass
 
@@ -297,6 +308,32 @@ class DownloadEngine:
                         )
             except Exception as e:
                 self.console.print(f"[yellow]Spotify download failed: {e}.[/yellow]")
+                raise e
+
+        # Specialized TIDAL handler (tracks, playlists, albums)
+        if (info and info.get("is_tidal")) or is_tidal_url(url):
+            try:
+                td = TidalDownloader(console=self.console)
+                td_info = info if (info and info.get("is_tidal")) else td.get_info(url)
+                if td_info:
+                    if td_info.get("is_playlist"):
+                        return td.download_collection(
+                            info=td_info,
+                            base_dest=Path(output_dir or "downloads").expanduser().resolve(),
+                            playlist_items=playlist_items,
+                            audio_format=audio_format or "flac",
+                            audio_quality=audio_quality or "320",
+                        )
+                    else:
+                        return td.download_track(
+                            track_info=td_info,
+                            output_path=output_path,
+                            output_dir=output_dir or "downloads",
+                            audio_format=audio_format or "flac",
+                            audio_quality=audio_quality or "320",
+                        )
+            except Exception as e:
+                self.console.print(f"[yellow]TIDAL download failed: {e}.[/yellow]")
                 raise e
 
         # If info indicated direct stream or scraper extracted an embedded stream URL

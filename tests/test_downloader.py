@@ -812,6 +812,324 @@ class TestSpotifyDownloader(unittest.TestCase):
             self.assertGreater(len(b64_pic), 50)
 
 
+class TestTidalDownloader(unittest.TestCase):
+    """Unit tests for TIDAL lossless track, album, and playlist downloader."""
+
+    def test_is_tidal_url_and_parsing(self):
+        from simple_downloader.tidal import is_tidal_url, parse_tidal_url
+
+        self.assertTrue(is_tidal_url("https://tidal.com/track/12345678"))
+        self.assertTrue(is_tidal_url("https://listen.tidal.com/track/12345678"))
+        self.assertTrue(is_tidal_url("https://tidal.com/browse/track/12345678"))
+        self.assertTrue(is_tidal_url("https://tidal.com/album/87654321"))
+        self.assertTrue(is_tidal_url("https://listen.tidal.com/album/87654321"))
+        self.assertTrue(is_tidal_url("https://tidal.com/playlist/5ac41fbb-927b-427e-8224-87bf12d218a3"))
+        self.assertTrue(is_tidal_url("https://listen.tidal.com/playlist/5ac41fbb-927b-427e-8224-87bf12d218a3"))
+        self.assertFalse(is_tidal_url("https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT"))
+        self.assertFalse(is_tidal_url("https://youtube.com/watch?v=12345"))
+        self.assertFalse(is_tidal_url(None))
+        self.assertFalse(is_tidal_url(""))
+
+        self.assertEqual(parse_tidal_url("https://tidal.com/track/12345678"), ("track", "12345678"))
+        self.assertEqual(parse_tidal_url("https://listen.tidal.com/album/87654321"), ("album", "87654321"))
+        self.assertEqual(
+            parse_tidal_url("https://tidal.com/playlist/5ac41fbb-927b-427e-8224-87bf12d218a3"),
+            ("playlist", "5ac41fbb-927b-427e-8224-87bf12d218a3")
+        )
+
+    def test_build_tidal_cover_url(self):
+        from simple_downloader.tidal import build_tidal_cover_url
+
+        self.assertIsNone(build_tidal_cover_url(None))
+        self.assertEqual(
+            build_tidal_cover_url("5ac41fbb-927b-427e-8224-87bf12d218a3"),
+            "https://resources.tidal.com/images/5ac41fbb/927b/427e/8224/87bf12d218a3/1280x1280.jpg"
+        )
+        self.assertEqual(
+            build_tidal_cover_url("5ac41fbb-927b-427e-8224-87bf12d218a3", size="640x640"),
+            "https://resources.tidal.com/images/5ac41fbb/927b/427e/8224/87bf12d218a3/640x640.jpg"
+        )
+
+    def test_tidal_track_info_mock_api(self):
+        from unittest.mock import patch, Mock
+        from simple_downloader.tidal import TidalDownloader
+
+        td = TidalDownloader()
+        mock_api_data = {
+            "id": 12345,
+            "title": "Masterpiece",
+            "artists": [{"name": "Audiophile Artist"}],
+            "album": {
+                "title": "Audiophile Album",
+                "cover": "11111111-2222-3333-4444-555555555555"
+            },
+            "duration": 240,
+            "audioQuality": "HI_RES_LOSSLESS",
+            "trackNumber": 3,
+        }
+        mock_resp = Mock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = mock_api_data
+
+        with patch("requests.get", return_value=mock_resp):
+            info = td.get_info("https://tidal.com/track/12345")
+
+        self.assertIsNotNone(info)
+        self.assertTrue(info["is_tidal"])
+        self.assertFalse(info["is_playlist"])
+        self.assertEqual(info["title"], "Audiophile Artist - Masterpiece")
+        self.assertEqual(info["track_title"], "Masterpiece")
+        self.assertEqual(info["artist"], "Audiophile Artist")
+        self.assertEqual(info["album"], "Audiophile Album")
+        self.assertEqual(info["duration"], 240)
+        self.assertEqual(info["audio_quality"], "HI_RES_LOSSLESS")
+        self.assertEqual(info["track_number"], 3)
+        self.assertIn("11111111/2222/3333/4444/555555555555", info["thumbnail"])
+
+    def test_tidal_track_info_html_fallback(self):
+        from unittest.mock import patch, Mock
+        from simple_downloader.tidal import TidalDownloader
+
+        td = TidalDownloader()
+        mock_html = '''
+        <html><head>
+        <script type="application/ld+json">
+        {
+            "@type": "MusicRecording",
+            "name": "Fallback Song",
+            "byArtist": {"name": "Fallback Artist"},
+            "inAlbum": {"name": "Fallback Album"},
+            "image": "https://resources.tidal.com/images/cover.jpg",
+            "duration": "PT3M30S"
+        }
+        </script></head><body></body></html>
+        '''
+        fail_resp = Mock()
+        fail_resp.status_code = 404
+        html_resp = Mock()
+        html_resp.status_code = 200
+        html_resp.text = mock_html
+
+        with patch("requests.get", side_effect=[fail_resp, html_resp]):
+            info = td.get_info("https://tidal.com/track/99999")
+
+        self.assertIsNotNone(info)
+        self.assertTrue(info["is_tidal"])
+        self.assertEqual(info["track_title"], "Fallback Song")
+        self.assertEqual(info["artist"], "Fallback Artist")
+        self.assertEqual(info["album"], "Fallback Album")
+        self.assertEqual(info["duration"], 210)
+
+    def test_tidal_album_info_mock(self):
+        from unittest.mock import patch, Mock
+        from simple_downloader.tidal import TidalDownloader
+
+        td = TidalDownloader()
+        album_meta = {
+            "title": "Greatest Hits",
+            "artist": {"name": "Legend"},
+            "cover": "aaaa-bbbb-cccc",
+            "releaseDate": "2025-05-01",
+        }
+        album_tracks = {
+            "items": [
+                {"id": 1, "title": "Track One", "artists": [{"name": "Legend"}], "duration": 180, "trackNumber": 1},
+                {"id": 2, "title": "Track Two", "artists": [{"name": "Legend"}], "duration": 200, "trackNumber": 2},
+            ]
+        }
+        resp1 = Mock(status_code=200)
+        resp1.json.return_value = album_meta
+        resp2 = Mock(status_code=200)
+        resp2.json.return_value = album_tracks
+
+        with patch("requests.get", side_effect=[resp1, resp2]):
+            info = td.get_info("https://tidal.com/album/1010")
+
+        self.assertIsNotNone(info)
+        self.assertTrue(info["is_tidal"])
+        self.assertTrue(info["is_playlist"])
+        self.assertEqual(info["tidal_type"], "album")
+        self.assertEqual(info["album_title"], "Greatest Hits")
+        self.assertEqual(info["playlist_count"], 2)
+        self.assertEqual(len(info["entries"]), 2)
+        self.assertEqual(info["entries"][0]["track_title"], "Track One")
+
+    def test_tidal_playlist_info_mock(self):
+        from unittest.mock import patch, Mock
+        from simple_downloader.tidal import TidalDownloader
+
+        td = TidalDownloader()
+        pl_meta = {
+            "title": "Hi-Fi Chill",
+            "image": "pppp-qqqq-rrrr",
+        }
+        pl_tracks = {
+            "items": [
+                {"id": 10, "title": "Chill 1", "artists": [{"name": "Artist 1"}], "album": {"title": "Alb 1"}, "duration": 190},
+                {"id": 20, "title": "Chill 2", "artists": [{"name": "Artist 2"}], "album": {"title": "Alb 2"}, "duration": 210},
+            ]
+        }
+        resp1 = Mock(status_code=200)
+        resp1.json.return_value = pl_meta
+        resp2 = Mock(status_code=200)
+        resp2.json.return_value = pl_tracks
+
+        with patch("requests.get", side_effect=[resp1, resp2]):
+            info = td.get_info("https://tidal.com/playlist/5ac41fbb-927b-427e-8224-87bf12d218a3")
+
+        self.assertIsNotNone(info)
+        self.assertTrue(info["is_tidal"])
+        self.assertTrue(info["is_playlist"])
+        self.assertEqual(info["tidal_type"], "playlist")
+        self.assertEqual(info["title"], "Hi-Fi Chill")
+        self.assertEqual(info["playlist_count"], 2)
+
+    def test_tidal_resolve_audio_stream_proximity(self):
+        from unittest.mock import patch, MagicMock
+        from simple_downloader.tidal import TidalDownloader
+        import yt_dlp
+
+        td = TidalDownloader()
+        mock_candidates = [
+            {"id": "video_intro_version", "title": "Artist - Song (10min Movie)", "duration": 600},
+            {"id": "exact_album_version", "title": "Artist - Song (Official Audio)", "duration": 210},
+            {"id": "short_snippet", "title": "Artist - Song Teaser", "duration": 30},
+        ]
+        mock_ydl = MagicMock()
+        mock_ydl.__enter__.return_value = mock_ydl
+        mock_ydl.extract_info.return_value = {"entries": mock_candidates}
+
+        with patch.object(yt_dlp, "YoutubeDL", return_value=mock_ydl):
+            resolved = td.resolve_audio_stream("Artist", "Song", expected_duration=212)
+
+        self.assertEqual(resolved, "https://www.youtube.com/watch?v=exact_album_version")
+
+    def test_tidal_engine_routing(self):
+        from unittest.mock import patch
+        from simple_downloader.engine import DownloadEngine
+
+        engine = DownloadEngine()
+        with patch("simple_downloader.engine.TidalDownloader") as mock_td_cls:
+            mock_td_inst = mock_td_cls.return_value
+            mock_td_inst.get_info.return_value = {
+                "id": "123", "title": "Artist - Song", "is_tidal": True, "is_playlist": False,
+            }
+            mock_td_inst.download_track.return_value = "/downloads/Song.flac"
+
+            info = engine.get_media_info("https://tidal.com/track/123")
+            self.assertTrue(info.get("is_tidal"))
+
+            res = engine.download(
+                "https://tidal.com/track/123",
+                audio_format="flac",
+                show_progress=False,
+            )
+            self.assertEqual(res, "/downloads/Song.flac")
+            mock_td_inst.download_track.assert_called_once()
+
+    def test_tidal_download_track_calls_ffmpeg_flac(self):
+        from unittest.mock import patch, MagicMock
+        from simple_downloader.tidal import TidalDownloader
+        import tempfile
+        import glob
+
+        td = TidalDownloader()
+        track_info = {
+            "id": "12345",
+            "title": "Artist - Hi-Fi Master",
+            "track_title": "Hi-Fi Master",
+            "artist": "Artist",
+            "album": "Master Album",
+            "duration": 210,
+            "thumbnail": None,
+            "audio_quality": "HI_RES_LOSSLESS",
+            "track_number": 1,
+        }
+
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with patch.object(td, "resolve_audio_stream", return_value="https://youtube.com/watch?v=test1234"):
+                with patch("yt_dlp.YoutubeDL") as mock_ydl_cls:
+                    def mock_download(urls):
+                        temps = glob.glob(tempfile.gettempdir() + "/vdown_tidal_*")
+                        if temps:
+                            with open(os.path.join(temps[-1], "stream.webm"), "wb") as f:
+                                f.write(b"dummy tidal audio")
+                        return 0
+
+                    mock_inst = MagicMock()
+                    mock_inst.__enter__.return_value = mock_inst
+                    mock_inst.download.side_effect = mock_download
+                    mock_ydl_cls.return_value = mock_inst
+
+                    captured_cmd = []
+                    def mock_run(cmd, *args, **kwargs):
+                        captured_cmd.extend(cmd)
+                        # Touch target output file
+                        out = cmd[-1]
+                        with open(out, "wb") as f:
+                            f.write(b"flac data")
+                        res = MagicMock()
+                        res.returncode = 0
+                        return res
+
+                    with patch("subprocess.run", side_effect=mock_run):
+                        res = td.download_track(
+                            track_info=track_info,
+                            output_dir=temp_dir,
+                            audio_format="flac",
+                        )
+
+            self.assertTrue(os.path.exists(res))
+            self.assertTrue(res.endswith(".flac"))
+            self.assertIn("flac", captured_cmd)
+            self.assertIn("-metadata", captured_cmd)
+            self.assertIn("title=Hi-Fi Master", captured_cmd)
+            self.assertIn("artist=Artist", captured_cmd)
+
+    def test_tidal_download_collection_selection(self):
+        from unittest.mock import patch
+        from simple_downloader.tidal import TidalDownloader
+        import tempfile
+        from pathlib import Path
+
+        td = TidalDownloader()
+        col_info = {
+            "id": "col1",
+            "title": "Audiophile Master Collection",
+            "album_title": "Audiophile Master Collection",
+            "tidal_type": "album",
+            "entries": [
+                {"title": "Track 1", "track_title": "Track 1", "artist": "A1"},
+                {"title": "Track 2", "track_title": "Track 2", "artist": "A2"},
+                {"title": "Track 3", "track_title": "Track 3", "artist": "A3"},
+            ]
+        }
+
+        with tempfile.TemporaryDirectory() as td_dir:
+            with patch.object(td, "download_track", return_value="fake.flac") as mock_dt:
+                folder = td.download_collection(
+                    info=col_info,
+                    base_dest=Path(td_dir),
+                    playlist_items="2-3",
+                    audio_format="flac",
+                )
+                self.assertEqual(mock_dt.call_count, 2)
+                self.assertTrue(Path(folder).exists())
+
+    def test_cli_tidal_routing(self):
+        from unittest.mock import patch
+        from simple_downloader.cli import main
+
+        with patch("sys.argv", ["vdown", "https://tidal.com/track/12345", "--audio-format", "flac"]), \
+             patch("simple_downloader.cli.do_download") as mock_dd, \
+             patch("simple_downloader.cli.DownloadEngine"):
+            main()
+            mock_dd.assert_called_once()
+            call_kwargs = mock_dd.call_args[1]
+            self.assertTrue(call_kwargs["audio_only"])
+            self.assertEqual(call_kwargs["audio_format"], "flac")
+
+
 class TestTurboAndTorrentDownloader(unittest.TestCase):
     """Unit tests for IDM-style Turbo multi-connection and BitTorrent modules."""
 

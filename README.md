@@ -7,7 +7,8 @@ A fast, versatile command-line video and media downloader. Download videos, audi
 - **Interactive ASCII Art Hub**: Launch `vdown` to access a guided welcome screen with rich system diagnostics, tool statuses, and top-level menu selection.
 - **IDM-Style Turbo Accelerator**: Parallel segmented multi-connection engine (4–32 concurrent streams via HTTP byte ranges) to bypass ISP and server bandwidth throttling on direct links.
 - **BitTorrent & Magnet P2P Downloads**: High-speed peer-to-peer downloading for magnet links and `.torrent` files with DHT, peer swarm integration, and pure Python metadata inspection.
-- **Universal Link Support**: Downloads from YouTube, Facebook, Instagram, TikTok (without watermark), Spotify, Twitter/X, Vimeo, Reddit, Twitch, and 1800+ other platforms.
+- **Universal Link Support**: Downloads from YouTube, Facebook, Instagram, TikTok (without watermark), Spotify, TIDAL, Twitter/X, Vimeo, Reddit, Twitch, and 1800+ other platforms.
+- **TIDAL Master & Lossless Audio**: Extract official TIDAL metadata, tracks, albums, and playlists in studio-quality **Lossless FLAC**, **WAV PCM**, or **320 kbps MP3** with embedded 1280x1280 artwork.
 - **Spotify Tracks & Playlists**: Download Spotify tracks, playlists, and albums in **FLAC Lossless**, **WAV PCM**, or **320 kbps MP3** with embedded tags and high-resolution album cover art.
 - **YouTube Playlists**: Downloads complete playlists or specific track ranges into organized folders with track numbers (`01 - Title.mp4`).
 - **Studio-Quality Audio Extraction**: Extract audio in lossless **FLAC** (bit-perfect studio quality), **320 kbps MP3** (extreme high quality), **M4A/AAC**, **WAV** (lossless uncompressed PCM), and **OPUS**.
@@ -145,12 +146,32 @@ vdown "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M"
 vdown "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M" --playlist-items 1-5 --audio-format flac
 ```
 
-### 7. Choose Video Resolution (e.g. 4K, 1080p, or 720p)
+### 7. TIDAL Tracks, Albums & Playlists (Lossless FLAC, WAV, 320k MP3)
+Official TIDAL catalog metadata extraction with 1280x1280 high-res artwork, duration proximity matching, and transcoding into bit-perfect Lossless FLAC, uncompressed WAV, or 320 kbps MP3:
+
+```bash
+# Download TIDAL track as Studio Lossless FLAC with embedded 1280x1280 album art
+vdown "https://tidal.com/track/101700680" --audio-format flac
+
+# Download TIDAL track as uncompressed Lossless WAV with native ID3v2 APIC splash art
+vdown "https://tidal.com/track/101700680" --audio-format wav
+
+# Download TIDAL track as 320 kbps MP3
+vdown "https://tidal.com/track/101700680" --audio-format mp3 -aq 320
+
+# Download full TIDAL Album into organized folder with track numbering and cover.jpg
+vdown "https://tidal.com/album/101700666" --audio-format flac
+
+# Download specific track range from a TIDAL Playlist
+vdown "https://tidal.com/playlist/5ac41fbb-927b-427e-8224-87bf12d218a3" --playlist-items 1-10 --audio-format flac
+```
+
+### 8. Choose Video Resolution (e.g. 4K, 1080p, or 720p)
 ```bash
 vdown "https://www.youtube.com/watch?v=..." -q 1080p
 ```
 
-### 8. TikTok (No Watermark & Photo Slideshows)
+### 9. TikTok (No Watermark & Photo Slideshows)
 ```bash
 vdown "https://vt.tiktok.com/ZSqF9Tr6a/"
 
@@ -158,23 +179,23 @@ vdown "https://vt.tiktok.com/ZSqF9Tr6a/"
 vdown "https://vt.tiktok.com/ZSqF9Tr6a/" -a --audio-format flac
 ```
 
-### 9. Instagram & Facebook (With Browser Session)
+### 10. Instagram & Facebook (With Browser Session)
 ```bash
 vdown "https://www.instagram.com/reel/.../" --browser chromium
 vdown "https://www.facebook.com/reel/..." --browser chromium
 ```
 
-### 10. Inspect Link Details & Available Formats
+### 11. Inspect Link Details & Available Formats
 ```bash
 vdown "https://..." --info
 ```
 
-### 11. Custom Output Directory & File Name
+### 12. Custom Output Directory & File Name
 ```bash
 vdown "https://..." -o "video.mp4" -d ~/Downloads
 ```
 
-### 12. Batch Download
+### 13. Batch Download
 ```bash
 vdown -b links.txt -d ~/Downloads
 ```

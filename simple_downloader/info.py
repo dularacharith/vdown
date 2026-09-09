@@ -40,6 +40,26 @@ def display_media_info(info: Dict[str, Any], console: Console) -> None:
                     last_title = last_entry.get("title", f"Track {len(entries)}") if isinstance(last_entry, dict) else f"Track {len(entries)}"
                     details.append("Last Track: ", style="dim cyan")
                     details.append(f"{last_title}\n")
+        elif info.get("is_tidal"):
+            t_type = info.get("tidal_type", "playlist").capitalize()
+            details.append(f"TIDAL {t_type}\n")
+            details.append(f"{t_type} Title: ", style="bold cyan")
+            details.append(f"{title}\n")
+            if info.get("artist"):
+                details.append("Artist: ", style="bold cyan")
+                details.append(f"{info['artist']}\n")
+            details.append("Total Tracks: ", style="bold cyan")
+            details.append(f"{count} tracks\n")
+            if entries and len(entries) > 0:
+                first_entry = entries[0]
+                first_title = first_entry.get("title", "Track 1") if isinstance(first_entry, dict) else "Track 1"
+                details.append("First Track: ", style="dim cyan")
+                details.append(f"{first_title}\n")
+                if len(entries) > 1:
+                    last_entry = entries[-1]
+                    last_title = last_entry.get("title", f"Track {len(entries)}") if isinstance(last_entry, dict) else f"Track {len(entries)}"
+                    details.append("Last Track: ", style="dim cyan")
+                    details.append(f"{last_title}\n")
         else:
             details.append("YouTube Playlist\n")
             details.append("Playlist Title: ", style="bold cyan")
@@ -95,6 +115,18 @@ def display_media_info(info: Dict[str, Any], console: Console) -> None:
             if info.get("album"):
                 details.append("Album: ", style="bold cyan")
                 details.append(f"{info['album']}\n")
+        elif info.get("is_tidal"):
+            details.append("Platform: ", style="bold cyan")
+            details.append("TIDAL (Lossless / Master Quality Audio)\n")
+            if info.get("artist"):
+                details.append("Artist: ", style="bold cyan")
+                details.append(f"{info['artist']}\n")
+            if info.get("album"):
+                details.append("Album: ", style="bold cyan")
+                details.append(f"{info['album']}\n")
+            if info.get("audio_quality"):
+                details.append("Audio Quality: ", style="bold green")
+                details.append(f"{info['audio_quality']}\n")
 
     console.print(
         Panel(
