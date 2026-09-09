@@ -288,11 +288,11 @@ class TestCLIParser(unittest.TestCase):
 
         engine = DownloadEngine()
         # Flow:
-        # 1. Main menu: choice '4' (Music & Audio)
+        # 1. Main menu: choice '5' (Music & Audio)
         # 2. Music prompt: 'https://open.spotify.com/track/123'
         # 3. Post-download action: '1' (Main Menu)
-        # 4. Main menu: choice '8' (Exit)
-        prompt_responses = ["4", "https://open.spotify.com/track/123", "1", "8"]
+        # 4. Main menu: choice '9' (Exit)
+        prompt_responses = ["5", "https://open.spotify.com/track/123", "1", "9"]
 
         with patch("simple_downloader.cli.is_tool_installed", return_value=True), \
              patch("simple_downloader.cli._run_media_wizard", return_value=0) as mock_wizard, \
@@ -309,13 +309,13 @@ class TestCLIParser(unittest.TestCase):
 
         engine = DownloadEngine()
         # Flow:
-        # 1. Main menu: choice '4' (Music & Audio)
+        # 1. Main menu: choice '5' (Music & Audio)
         # 2. Track 1 URL: 'https://open.spotify.com/track/1'
         # 3. Post-download action: '2' (Download Again)
         # 4. Track 2 URL: 'https://open.spotify.com/track/2'
         # 5. Post-download action: '3' (Exit)
         prompt_responses = [
-            "4",
+            "5",
             "https://open.spotify.com/track/1",
             "2",
             "https://open.spotify.com/track/2",
@@ -341,8 +341,8 @@ class TestCLIParser(unittest.TestCase):
         # Flow:
         # 1. Initial URL download finishes
         # 2. Post-download action: '1' (Main Menu)
-        # 3. Main menu: choice '8' (Exit)
-        prompt_responses = ["1", "8"]
+        # 3. Main menu: choice '9' (Exit)
+        prompt_responses = ["1", "9"]
 
         with patch("simple_downloader.cli.is_tool_installed", return_value=True), \
              patch("simple_downloader.cli._run_media_wizard", return_value=0) as mock_wizard, \
@@ -359,11 +359,11 @@ class TestCLIParser(unittest.TestCase):
 
         engine = DownloadEngine()
         # Flow:
-        # 1. Main menu: choice '3' (Video & Stream)
+        # 1. Main menu: choice '4' (Video & Stream)
         # 2. Video URL: 'https://youtube.com/watch?v=123'
         # 3. _run_media_wizard cancelled (user chose Back to Main Menu) -> returns MEDIA_WIZARD_CANCELLED
-        # 4. Returned directly to Main menu: choice '8' (Exit)
-        prompt_responses = ["3", "https://youtube.com/watch?v=123", "8"]
+        # 4. Returned directly to Main menu: choice '9' (Exit)
+        prompt_responses = ["4", "https://youtube.com/watch?v=123", "9"]
 
         with patch("simple_downloader.cli.is_tool_installed", return_value=True), \
              patch("simple_downloader.cli._run_media_wizard", return_value=MEDIA_WIZARD_CANCELLED) as mock_wizard, \
@@ -1869,6 +1869,316 @@ class TestInstallerModule(unittest.TestCase):
              patch("subprocess.run", return_value=mock_proc):
             res = ensure_tool_installed("aria2c")
             self.assertTrue(res)
+
+
+class TestSeriesAndShowDownloader(unittest.TestCase):
+    """Unit tests for online TV series & multi-episode streaming downloader."""
+
+    def test_is_series_url(self):
+        from simple_downloader.series import is_series_url
+
+        # Roopa Hala
+        self.assertTrue(is_series_url("https://roopahala.com.au/new/content/13074/movie"))
+        self.assertTrue(is_series_url("https://roopahala.lk/watch/45"))
+        self.assertTrue(is_series_url("http://roopahala.com.au/category/rent?category=tvshows"))
+
+        # Netflix
+        self.assertTrue(is_series_url("https://www.netflix.com/title/80057281"))
+        self.assertTrue(is_series_url("https://netflix.com/watch/80057281"))
+
+        # Generic streaming patterns
+        self.assertTrue(is_series_url("https://streamingsite.to/tvshow/breaking-bad"))
+        self.assertTrue(is_series_url("https://openstreaming.org/series/stranger-things/season/1/episode/2"))
+
+        # Non-series URLs
+        self.assertFalse(is_series_url("https://www.youtube.com/watch?v=dQw4w9WgXcQ"))
+        self.assertFalse(is_series_url("https://example.com/video.mp4"))
+        self.assertFalse(is_series_url("https://open.spotify.com/track/123"))
+
+    def test_episode_dataclass(self):
+        from simple_downloader.series import Episode
+
+        ep1 = Episode(
+            show_title="Breaking Bad",
+            season_number=1,
+            episode_number=1,
+            title="Pilot",
+        )
+        self.assertEqual(ep1.formatted_title(), "S01E01 - Pilot")
+        self.assertEqual(ep1.safe_filename("mp4"), "Breaking Bad - S01E01 - Pilot.mp4")
+
+        # Untitled episode
+        ep2 = Episode(
+            show_title="Mystery: Show",
+            season_number=2,
+            episode_number=5,
+            title="",
+        )
+        self.assertEqual(ep2.formatted_title(), "S02E05")
+        self.assertEqual(ep2.safe_filename("mp4"), "Mystery_ Show - S02E05.mp4")
+
+    def test_episode_range_parsing(self):
+        from simple_downloader.series import Episode, parse_episode_selection
+
+        episodes = [
+            Episode(show_title="Show", season_number=1, episode_number=1, title="Ep 1"),
+            Episode(show_title="Show", season_number=1, episode_number=2, title="Ep 2"),
+            Episode(show_title="Show", season_number=1, episode_number=3, title="Ep 3"),
+            Episode(show_title="Show", season_number=2, episode_number=1, title="Ep 4"),
+            Episode(show_title="Show", season_number=2, episode_number=2, title="Ep 5"),
+        ]
+
+        # 'all'
+        self.assertEqual(len(parse_episode_selection("all", episodes)), 5)
+        self.assertEqual(len(parse_episode_selection("", episodes)), 5)
+
+        # '1-3'
+        res_range = parse_episode_selection("1-3", episodes)
+        self.assertEqual(len(res_range), 3)
+        self.assertEqual([e.episode_number for e in res_range], [1, 2, 3])
+
+        # 'S01'
+        res_s1 = parse_episode_selection("S01", episodes)
+        self.assertEqual(len(res_s1), 3)
+        self.assertTrue(all(e.season_number == 1 for e in res_s1))
+
+        # 'S02'
+        res_s2 = parse_episode_selection("s2", episodes)
+        self.assertEqual(len(res_s2), 2)
+        self.assertTrue(all(e.season_number == 2 for e in res_s2))
+
+        # 'S01E02'
+        res_single_se = parse_episode_selection("S01E02", episodes)
+        self.assertEqual(len(res_single_se), 1)
+        self.assertEqual(res_single_se[0].episode_number, 2)
+
+        # '1, 4'
+        res_list = parse_episode_selection("1, 4", episodes)
+        self.assertEqual(len(res_list), 2)
+
+    def test_roopahala_extractor(self):
+        import requests
+        from simple_downloader.series import RoopaHalaExtractor
+        import base64
+        from unittest.mock import patch, MagicMock
+
+        raw_stream = "https://content.roopahala.com.au/stream.m3u8"
+        obfuscated = base64.b64encode(raw_stream.encode("utf-8")).decode("ascii")
+
+        mock_html = f"""
+        <html>
+        <head>
+            <title>Salupata Ahasata - Roopa Hala</title>
+            <meta property="og:title" content="Salupata Ahasata - Roopa Hala" />
+            <meta property="og:image" content="https://content.roopahala.com.au/poster.jpg" />
+            <meta name="csrf-token" content="test-token-123" />
+        </head>
+        <body>
+            <button onclick="playMovieSecure('13074', 'movie')">Play</button>
+            <script>
+                const obfuscatedUrl = '{obfuscated}';
+                const actualUrl = atob(obfuscatedUrl);
+            </script>
+        </body>
+        </html>
+        """
+
+        mock_resp = MagicMock()
+        mock_resp.text = mock_html
+        mock_resp.status_code = 200
+
+        extractor = RoopaHalaExtractor()
+        with patch.object(requests.Session, "get", return_value=mock_resp):
+            series = extractor.extract_series("https://roopahala.com.au/new/content/13074/movie")
+            self.assertEqual(series.title, "Salupata Ahasata")
+            self.assertEqual(series.platform_name, "Roopa Hala")
+            self.assertEqual(series.poster_url, "https://content.roopahala.com.au/poster.jpg")
+            self.assertEqual(series.total_episodes, 1)
+
+            ep = series.all_episodes[0]
+            stream_url, headers = extractor.resolve_stream(ep)
+            self.assertEqual(stream_url, raw_stream)
+            self.assertEqual(headers.get("Referer"), "https://roopahala.com.au/")
+
+    def test_netflix_extractor(self):
+        import requests
+        from simple_downloader.series import NetflixExtractor
+        from unittest.mock import patch, MagicMock
+
+        mock_html = """
+        <html>
+        <head>
+            <script type="application/ld+json">
+            {
+                "@type": "TVSeries",
+                "name": "Stranger Things",
+                "image": "https://netflix.com/poster.jpg",
+                "containsSeason": [
+                    {
+                        "@type": "TVSeason",
+                        "seasonNumber": 1,
+                        "episode": [
+                            {"@type": "TVEpisode", "episodeNumber": 1, "name": "Chapter One: The Vanishing of Will Byers"},
+                            {"@type": "TVEpisode", "episodeNumber": 2, "name": "Chapter Two: The Weirdo on Maple Street"}
+                        ]
+                    }
+                ]
+            }
+            </script>
+        </head>
+        </html>
+        """
+
+        mock_resp = MagicMock()
+        mock_resp.text = mock_html
+        mock_resp.status_code = 200
+
+        extractor = NetflixExtractor()
+        with patch.object(requests.Session, "get", return_value=mock_resp):
+            series = extractor.extract_series("https://www.netflix.com/title/80057281")
+            self.assertEqual(series.title, "Stranger Things")
+            self.assertEqual(series.platform_name, "Netflix")
+            self.assertTrue(series.drm_protected)
+            self.assertEqual(series.total_episodes, 2)
+            self.assertEqual(series.all_episodes[0].formatted_title(), "S01E01 - Chapter One: The Vanishing of Will Byers")
+
+    def test_series_downloader_organized_structure(self):
+        import tempfile
+        from simple_downloader.series import Series, Episode, SeriesDownloader
+        from unittest.mock import patch
+
+        temp_dir = tempfile.mkdtemp(prefix="test_series_")
+        try:
+            ep1 = Episode(
+                show_title="Test Show",
+                season_number=1,
+                episode_number=1,
+                title="Beginning",
+                thumbnail="https://example.com/thumb.jpg",
+                stream_url="https://example.com/test.m3u8",
+            )
+            series = Series(
+                title="Test Show",
+                url="https://example.com/show",
+                poster_url="https://example.com/poster.jpg",
+                seasons={1: [ep1]},
+            )
+
+            downloader = SeriesDownloader()
+
+            # Mock _download_stream_with_ytdlp to simulate writing file
+            def fake_download_stream(stream_url, dest_file, **kwargs):
+                dest_file.parent.mkdir(parents=True, exist_ok=True)
+                with open(dest_file, "wb") as f:
+                    f.write(b"\x00" * 100)
+                return True
+
+            with patch.object(downloader, "_download_stream_with_ytdlp", side_effect=fake_download_stream), \
+                 patch.object(downloader, "_download_temp_image", return_value="/tmp/fake_thumb.jpg"), \
+                 patch("simple_downloader.series.ensure_tool_installed", return_value=True), \
+                 patch("simple_downloader.series.attach_splash_art", return_value=True) as mock_splash:
+
+                res = downloader.download_series(
+                    series=series,
+                    episodes=[ep1],
+                    output_dir=temp_dir,
+                    embed_thumbnail=True,
+                )
+                self.assertEqual(res, 0)
+
+                expected_file = Path(temp_dir) / "Test Show" / "Season 01" / "Test Show - S01E01 - Beginning.mp4"
+                self.assertTrue(expected_file.exists())
+                mock_splash.assert_called()
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_series_downloader_drm_fallback(self):
+        import tempfile
+        from simple_downloader.series import Series, Episode, SeriesDownloader
+        from unittest.mock import patch
+
+        temp_dir = tempfile.mkdtemp(prefix="test_drm_")
+        try:
+            ep1 = Episode(
+                show_title="Dark",
+                season_number=1,
+                episode_number=1,
+                title="Secrets",
+                drm_protected=True,
+            )
+            series = Series(
+                title="Dark",
+                url="https://netflix.com/title/123",
+                seasons={1: [ep1]},
+                drm_protected=True,
+            )
+
+            downloader = SeriesDownloader()
+            with patch.object(downloader, "_search_torrent_magnet", return_value="magnet:?xt=urn:btih:abcdef1234567890"), \
+                 patch("simple_downloader.torrent.TorrentDownloader.download", return_value=0) as mock_torrent_dl, \
+                 patch("simple_downloader.series.ensure_tool_installed", return_value=True):
+
+                res = downloader.download_series(
+                    series=series,
+                    episodes=[ep1],
+                    output_dir=temp_dir,
+                )
+                self.assertEqual(res, 0)
+                mock_torrent_dl.assert_called_once()
+        finally:
+            shutil.rmtree(temp_dir, ignore_errors=True)
+
+    def test_interactive_series_wizard(self):
+        from simple_downloader.cli import _run_series_wizard
+        from simple_downloader.series import Series, Episode
+        from unittest.mock import patch
+
+        ep1 = Episode(show_title="Test Series", season_number=1, episode_number=1, title="Pilot")
+        ep2 = Episode(show_title="Test Series", season_number=1, episode_number=2, title="Second")
+        series = Series(
+            title="Test Series",
+            url="https://roopahala.com.au/new/content/99/tvshow",
+            seasons={1: [ep1, ep2]},
+        )
+
+        prompt_responses = [
+            "2",      # Select episode range
+            "1",      # Range: 1
+            "1",      # Quality: Best
+            "downloads", # Destination dir
+        ]
+
+        with patch("simple_downloader.series.SeriesDownloader.download_series", return_value=0) as mock_download_series, \
+             patch("rich.prompt.Confirm.ask", return_value=False), \
+             patch("rich.prompt.Prompt.ask", side_effect=prompt_responses), \
+             patch("rich.console.Console.print"):
+            res = _run_series_wizard(engine=None, url=series.url, series_obj=series)
+            self.assertEqual(res, 0)
+            mock_download_series.assert_called_once()
+            call_kwargs = mock_download_series.call_args[1]
+            self.assertEqual(len(call_kwargs["episodes"]), 1)
+            self.assertEqual(call_kwargs["episodes"][0].title, "Pilot")
+
+    def test_cli_series_flag(self):
+        from simple_downloader.cli import main
+        from unittest.mock import patch, MagicMock
+        from simple_downloader.series import Series, Episode
+
+        ep1 = Episode(show_title="Sample Show", season_number=1, episode_number=1, title="Ep 1")
+        series = Series(
+            title="Sample Show",
+            url="https://roopahala.com.au/new/content/45/movie",
+            seasons={1: [ep1]},
+        )
+
+        mock_extractor = MagicMock()
+        mock_extractor.extract_series.return_value = series
+
+        with patch("simple_downloader.cli.get_series_extractor", return_value=mock_extractor), \
+             patch("simple_downloader.cli.SeriesDownloader.download_series", return_value=0) as mock_dl:
+            exit_code = main(["https://roopahala.com.au/new/content/45/movie", "--series", "--episodes", "1"])
+            self.assertEqual(exit_code, 0)
+            mock_dl.assert_called_once()
 
 
 if __name__ == "__main__":

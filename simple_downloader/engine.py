@@ -23,6 +23,12 @@ from simple_downloader.tiktok import TikTokDownloader, is_tiktok_url
 from simple_downloader.spotify import SpotifyDownloader, is_spotify_url
 from simple_downloader.tidal import TidalDownloader, is_tidal_url
 from simple_downloader.applemusic import AppleMusicDownloader, is_apple_music_url
+from simple_downloader.series import (
+    SeriesDownloader,
+    is_series_url,
+    get_series_extractor,
+    parse_episode_selection,
+)
 from simple_downloader.utils import (
     is_direct_media_url,
     format_bytes,
@@ -90,6 +96,44 @@ class DownloadEngine:
                 am_info = am.get_info(url)
                 if am_info:
                     return am_info
+            except Exception:
+                pass
+
+        # Specialized Series & TV Show handler (Roopa Hala, Netflix, Web Streaming)
+        if is_series_url(url):
+            try:
+                extractor = get_series_extractor(url)
+                series_obj = extractor.extract_series(
+                    url,
+                    browser=browser,
+                    cookie_file=cookie_file,
+                )
+                if series_obj:
+                    entries = [
+                        {
+                            "id": f"s{ep.season_number:02d}e{ep.episode_number:02d}",
+                            "title": ep.formatted_title(),
+                            "url": ep.url,
+                            "thumbnail": ep.thumbnail,
+                            "duration": ep.duration,
+                            "season_number": ep.season_number,
+                            "episode_number": ep.episode_number,
+                        }
+                        for ep in series_obj.all_episodes
+                    ]
+                    return {
+                        "id": "series",
+                        "title": series_obj.title,
+                        "url": series_obj.url,
+                        "thumbnail": series_obj.poster_url,
+                        "is_series": True,
+                        "is_playlist": True,
+                        "playlist_count": series_obj.total_episodes,
+                        "platform_name": series_obj.platform_name,
+                        "series_obj": series_obj,
+                        "entries": entries,
+                        "formats": [],
+                    }
             except Exception:
                 pass
 
@@ -386,6 +430,41 @@ class DownloadEngine:
                         )
             except Exception as e:
                 self.console.print(f"[yellow]Apple Music download failed: {e}.[/yellow]")
+                raise e
+
+        # Specialized Series & TV Show handler (Roopa Hala, Netflix, Web Streaming)
+        if (info and info.get("is_series")) or is_series_url(url):
+            try:
+                series_obj = info.get("series_obj") if info else None
+                if not series_obj:
+                    extractor = get_series_extractor(url)
+                    series_obj = extractor.extract_series(url, browser=browser, cookie_file=cookie_file)
+                if series_obj:
+                    episodes_to_download = series_obj.all_episodes
+                    if playlist_items:
+                        episodes_to_download = parse_episode_selection(playlist_items, series_obj.all_episodes)
+                    elif not playlist and series_obj.all_episodes:
+                        # If single download requested, take first matching episode
+                        episodes_to_download = [series_obj.all_episodes[0]]
+
+                    s_dl = SeriesDownloader(console=self.console)
+                    s_res = s_dl.download_series(
+                        series=series_obj,
+                        episodes=episodes_to_download,
+                        output_dir=output_dir or "downloads",
+                        quality=quality,
+                        browser=browser,
+                        cookie_file=cookie_file,
+                        subtitles=subtitles,
+                        sub_lang=sub_lang,
+                        embed_subs=embed_subs,
+                        embed_thumbnail=embed_thumbnail,
+                        rate_limit=rate_limit,
+                    )
+                    clean_title = sanitize_filename(series_obj.title)
+                    return os.path.join(output_dir or "downloads", clean_title)
+            except Exception as e:
+                self.console.print(f"[yellow]Series download failed: {e}.[/yellow]")
                 raise e
 
         # If info indicated direct stream or scraper extracted an embedded stream URL

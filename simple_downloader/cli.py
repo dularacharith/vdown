@@ -20,6 +20,12 @@ from simple_downloader.utils import parse_speed_limit, format_bytes
 from simple_downloader.turbo import TurboDownloader
 from simple_downloader.torrent import TorrentDownloader, is_torrent_or_magnet
 from simple_downloader.installer import ensure_tool_installed, is_tool_installed
+from simple_downloader.series import (
+    SeriesDownloader,
+    is_series_url,
+    get_series_extractor,
+    parse_episode_selection,
+)
 
 console = Console()
 
@@ -205,6 +211,19 @@ def create_parser() -> argparse.ArgumentParser:
     )
 
     parser.add_argument(
+        "--series", "--show",
+        dest="series",
+        action="store_true",
+        help="Download online TV show / series episodes (Roopa Hala, Netflix, web streaming)",
+    )
+
+    parser.add_argument(
+        "--episodes", "--seasons",
+        dest="episodes",
+        help="Episode or season selection filter (e.g. all, 1-5, S01E01-S01E06, S01, 3)",
+    )
+
+    parser.add_argument(
         "--turbo",
         action="store_true",
         help="Enable IDM-style multi-connection parallel segmented downloading",
@@ -271,6 +290,7 @@ def display_welcome_screen():
         f"[bold white]vdown v{__version__}[/bold white] — [dim]All-in-One CLI Media & High-Speed File Downloader[/dim]\n\n"
         f"• [bold cyan]🚀 Turbo Multi-Stream:[/bold cyan] IDM-style parallel segmented downloading to bypass bandwidth throttle\n"
         f"• [bold magenta]🧲 P2P Torrents & Magnets:[/bold magenta] Unthrottled BitTorrent peer-to-peer swarms\n"
+        f"• [bold bright_red]📺 Online Series & TV Shows:[/bold bright_red] Download episodes or full shows (Roopa Hala, Netflix, Web Streaming)\n"
         f"• [bold blue]🎬 Video & Streams:[/bold blue] YouTube (playlists & singles), TikTok (watermark-free), Instagram, Facebook\n"
         f"• [bold green]🎵 Studio Audio Quality:[/bold green] FLAC Lossless, 320 kbps MP3, WAV with embedded splash art (Spotify, TIDAL & Apple Music)\n"
         f"• [dim]Default Output Folder: [underline]{os.path.abspath('downloads')}[/underline][/dim]"
@@ -384,6 +404,10 @@ def _run_interactive_mode_impl(engine: DownloadEngine, initial_url: Optional[str
                 console.print("  [2] ▶️ [bold magenta]Play / Stream Directly in CLI[/bold magenta] (instant playback via mpv)")
                 action_choice = Prompt.ask("Select an option", choices=["1", "2"], default="1")
                 torrent_dl.download(current_target, stream=(action_choice == "2"))
+            elif is_series_url(current_target):
+                res = _run_series_wizard(engine, current_target)
+                if res == MEDIA_WIZARD_CANCELLED:
+                    break
             else:
                 res = _run_media_wizard(engine, current_target)
                 if res == MEDIA_WIZARD_CANCELLED:
@@ -408,16 +432,17 @@ def _run_interactive_mode_impl(engine: DownloadEngine, initial_url: Optional[str
         console.print("\n[bold yellow]What would you like to download?[/bold yellow]")
         console.print("  [1] 🚀 [bold cyan]Turbo Download[/bold cyan] (IDM-style Multi-Connection File Accelerator)")
         console.print("  [2] 🧲 [bold magenta]Torrent & Magnet[/bold magenta] (P2P High-Speed Swarm Downloader)")
-        console.print("  [3] 🎬 [bold blue]Video & Stream[/bold blue] (YouTube, TikTok, Reels, Facebook, Web)")
-        console.print("  [4] 🎵 [bold green]Music & Audio[/bold green] (Spotify, TIDAL, Apple Music, FLAC Lossless, 320k MP3, WAV)")
-        console.print("  [5] 📁 [bold white]Batch Download[/bold white] (Download links from a text file)")
-        console.print("  [6] ℹ️ [bold yellow]Media Inspector[/bold yellow] (Inspect link formats and quality)")
-        console.print("  [7] ⚙️ [bold dim]System Diagnostics[/bold dim] (Check FFmpeg, aria2c, disk space)")
-        console.print("  [8] 🚪 [bold red]Exit[/bold red]")
+        console.print("  [3] 📺 [bold bright_red]Online Series & TV Shows[/bold bright_red] (Roopa Hala, Netflix, Web Streaming)")
+        console.print("  [4] 🎬 [bold blue]Video & Stream[/bold blue] (YouTube, TikTok, Reels, Facebook, Web)")
+        console.print("  [5] 🎵 [bold green]Music & Audio[/bold green] (Spotify, TIDAL, Apple Music, FLAC Lossless, 320k MP3, WAV)")
+        console.print("  [6] 📁 [bold white]Batch Download[/bold white] (Download links from a text file)")
+        console.print("  [7] ℹ️ [bold yellow]Media Inspector[/bold yellow] (Inspect link formats and quality)")
+        console.print("  [8] ⚙️ [bold dim]System Diagnostics[/bold dim] (Check FFmpeg, aria2c, disk space)")
+        console.print("  [9] 🚪 [bold red]Exit[/bold red]")
 
-        choice = Prompt.ask("Select an option", choices=["1", "2", "3", "4", "5", "6", "7", "8"], default="1")
+        choice = Prompt.ask("Select an option", choices=["1", "2", "3", "4", "5", "6", "7", "8", "9"], default="1")
 
-        if choice == "8":
+        if choice == "9":
             console.print("\n[bold yellow]👋 Goodbye![/bold yellow]")
             return 0
 
@@ -481,6 +506,31 @@ def _run_interactive_mode_impl(engine: DownloadEngine, initial_url: Optional[str
         elif choice == "3":
             if not ensure_tool_installed(
                 "ffmpeg",
+                purpose="download streaming video segments and embed episode splash art",
+                console=console,
+            ):
+                continue
+            while True:
+                url = Prompt.ask("\n[bold yellow]Paste show or episode link (Roopa Hala, Netflix, Web Streaming)[/bold yellow] [dim]('m' for Main Menu)[/dim]")
+                url = url.strip().strip("'\"")
+                if not url or url.lower() in ("m", "menu", "b", "back"):
+                    break
+                res = _run_series_wizard(engine, url)
+                if res == MEDIA_WIZARD_CANCELLED:
+                    break
+
+                action = prompt_post_download_action(console, category_name="series or episode")
+                if action == "again":
+                    continue
+                elif action == "exit":
+                    console.print("\n[bold yellow]👋 Goodbye![/bold yellow]")
+                    return 0
+                else:  # "menu"
+                    break
+
+        elif choice == "4":
+            if not ensure_tool_installed(
+                "ffmpeg",
                 purpose="download, merge, and convert video streams",
                 console=console,
             ):
@@ -503,7 +553,7 @@ def _run_interactive_mode_impl(engine: DownloadEngine, initial_url: Optional[str
                 else:  # "menu"
                     break
 
-        elif choice == "4":
+        elif choice == "5":
             if not ensure_tool_installed(
                 "ffmpeg",
                 purpose="extract and convert studio-quality audio (FLAC, MP3, WAV)",
@@ -528,7 +578,7 @@ def _run_interactive_mode_impl(engine: DownloadEngine, initial_url: Optional[str
                 else:  # "menu"
                     break
 
-        elif choice == "5":
+        elif choice == "6":
             while True:
                 batch_path = Prompt.ask("\n[bold yellow]Enter path to text file containing URLs[/bold yellow] [dim]('m' for Main Menu)[/dim]", default="links.txt")
                 batch_path = batch_path.strip().strip("'\"")
@@ -547,7 +597,7 @@ def _run_interactive_mode_impl(engine: DownloadEngine, initial_url: Optional[str
                 else:  # "menu"
                     break
 
-        elif choice == "6":
+        elif choice == "7":
             while True:
                 url = Prompt.ask("\n[bold yellow]Paste media link to inspect[/bold yellow] [dim]('m' for Main Menu)[/dim]")
                 url = url.strip().strip("'\"")
@@ -571,9 +621,103 @@ def _run_interactive_mode_impl(engine: DownloadEngine, initial_url: Optional[str
                 else:  # "menu"
                     break
 
-        elif choice == "7":
+        elif choice == "8":
             display_system_diagnostics()
             continue
+
+
+def _run_series_wizard(engine: DownloadEngine, url: str, series_obj: Optional[Any] = None) -> int:
+    """Run interactive TV show / series download wizard."""
+    browser = None
+    u_lower = url.lower()
+    if any(d in u_lower for d in ["roopahala", "netflix"]):
+        console.print("[dim]Tip: Streaming platforms may require session cookies for authenticated/purchased titles.[/dim]")
+        if Confirm.ask("Use cookies from an installed browser?", default=False):
+            browser = Prompt.ask(
+                "Select browser",
+                choices=["chromium", "brave", "chrome", "firefox", "edge", "opera"],
+                default="chrome",
+            )
+
+    if not series_obj:
+        with console.status("[cyan]Extracting series and episode catalog...[/cyan]"):
+            try:
+                extractor = get_series_extractor(url)
+                series_obj = extractor.extract_series(url, browser=browser)
+            except Exception as e:
+                console.print(f"[bold red]Failed to extract series:[/bold red] {e}")
+                return 1
+
+    table = Table(title=f"📺 Series Overview: {series_obj.title}", show_header=True)
+    table.add_column("Property", style="bold cyan")
+    table.add_column("Details", style="white")
+
+    table.add_row("Platform", series_obj.platform_name)
+    num_seasons = len(series_obj.seasons)
+    table.add_row("Seasons", f"{num_seasons} season{'s' if num_seasons != 1 else ''}")
+    table.add_row("Total Episodes", f"{series_obj.total_episodes} episodes")
+
+    all_eps = series_obj.all_episodes
+    if all_eps:
+        table.add_row("First Episode", all_eps[0].formatted_title())
+        if len(all_eps) > 1:
+            table.add_row("Latest Episode", all_eps[-1].formatted_title())
+
+    console.print(table)
+
+    console.print("\n[bold yellow]Select download mode:[/bold yellow]")
+    console.print(f"  [1] 📥 [bold cyan]Download Entire Show[/bold cyan] ({series_obj.total_episodes} episodes) [Default]")
+    console.print("  [2] 🔢 [bold green]Select Episode Range[/bold green] (e.g. 1-5, S01E01-S01E06, S01)")
+    console.print("  [3] 🎯 [bold magenta]Download Single Episode[/bold magenta]")
+    console.print("  [4] ↩️ Back to Main Menu")
+
+    mode_choice = Prompt.ask("Choice", choices=["1", "2", "3", "4"], default="1")
+    if mode_choice == "4":
+        return MEDIA_WIZARD_CANCELLED
+
+    selected_episodes = all_eps
+    if mode_choice == "2":
+        range_input = Prompt.ask(
+            "Enter episode range to download (e.g. 1-5, S01E01-S01E06, S01, 1,3,5)",
+            default="1-5",
+        )
+        selected_episodes = parse_episode_selection(range_input, all_eps)
+    elif mode_choice == "3":
+        if len(all_eps) <= 25:
+            console.print("\n[bold cyan]Available Episodes:[/bold cyan]")
+            for idx, ep in enumerate(all_eps, start=1):
+                console.print(f"  [{idx}] {ep.formatted_title()}")
+            ep_idx_str = Prompt.ask(f"Select episode number (1-{len(all_eps)})", default="1")
+            try:
+                ep_idx = int(ep_idx_str)
+                selected_episodes = [all_eps[ep_idx - 1]]
+            except (ValueError, IndexError):
+                selected_episodes = [all_eps[0]]
+        else:
+            ep_input = Prompt.ask("Enter episode number or code (e.g. 1 or S01E02)", default="1")
+            selected_episodes = parse_episode_selection(ep_input, all_eps)
+
+    console.print(f"\n[bold green]Queued {len(selected_episodes)} episode(s) for download.[/bold green]")
+
+    console.print("\n[bold cyan]Select Quality:[/bold cyan]")
+    console.print("  [1] 🌟 Best (1080p Full HD / 4K) [Default]")
+    console.print("  [2] 720p HD")
+    console.print("  [3] 480p SD")
+    q_choice = Prompt.ask("Quality", choices=["1", "2", "3"], default="1")
+    q_map = {"1": "best", "2": "720p", "3": "480p"}
+    quality = q_map.get(q_choice, "best")
+
+    out_dir = Prompt.ask("Destination directory", default="downloads")
+
+    series_dl = SeriesDownloader(console=console)
+    return series_dl.download_series(
+        series=series_obj,
+        episodes=selected_episodes,
+        output_dir=out_dir,
+        quality=quality,
+        browser=browser,
+        embed_thumbnail=True,
+    )
 
 
 def _run_media_wizard(engine: DownloadEngine, url: str, force_audio: bool = False) -> int:
@@ -599,6 +743,9 @@ def _run_media_wizard(engine: DownloadEngine, url: str, force_audio: bool = Fals
             return 1
 
     display_media_info(info, console)
+
+    if info.get("is_series"):
+        return _run_series_wizard(engine, url, series_obj=info.get("series_obj"))
 
     # Detect playlist presence in link
     is_sp = info.get("is_spotify", False)
@@ -996,6 +1143,29 @@ def main(argv: Optional[List[str]] = None) -> int:
 
         # Single URL download mode
         rate_limit_val = parse_speed_limit(args.rate_limit)
+
+        # Online TV Show & Series mode
+        is_series_target = getattr(args, "series", False) or bool(getattr(args, "episodes", None)) or (args.url and is_series_url(args.url))
+        if is_series_target and args.url:
+            extractor = get_series_extractor(args.url)
+            with console.status("[cyan]Extracting series and episode catalog...[/cyan]"):
+                series_obj = extractor.extract_series(args.url, browser=args.browser, cookie_file=args.cookie_file)
+            episodes_filter = getattr(args, "episodes", None) or args.playlist_items or "all"
+            selected_eps = parse_episode_selection(episodes_filter, series_obj.all_episodes)
+            series_dl = SeriesDownloader(console=console)
+            return series_dl.download_series(
+                series=series_obj,
+                episodes=selected_eps,
+                output_dir=args.output_dir or "downloads",
+                quality=args.quality,
+                browser=args.browser,
+                cookie_file=args.cookie_file,
+                subtitles=args.subtitles,
+                sub_lang=args.sub_lang,
+                embed_subs=args.embed_subs,
+                embed_thumbnail=args.embed_thumbnail,
+                rate_limit=rate_limit_val,
+            )
 
         from simple_downloader.spotify import is_spotify_url, parse_spotify_url
         from simple_downloader.tidal import is_tidal_url, parse_tidal_url

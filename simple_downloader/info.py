@@ -78,7 +78,27 @@ def display_media_info(info: Dict[str, Any], console: Console) -> None:
                 if len(entries) > 1:
                     last_entry = entries[-1]
                     last_title = last_entry.get("title", f"Track {len(entries)}") if isinstance(last_entry, dict) else f"Track {len(entries)}"
-                    details.append("Last Track: ", style="dim cyan")
+        elif info.get("is_series"):
+            platform = info.get("platform_name", "Online Series")
+            details.append(f"{platform} Series\n")
+            details.append("Show Title: ", style="bold cyan")
+            details.append(f"{title}\n")
+            series_obj = info.get("series_obj")
+            if series_obj:
+                num_seasons = len(series_obj.seasons)
+                details.append("Seasons: ", style="bold cyan")
+                details.append(f"{num_seasons} season{'s' if num_seasons != 1 else ''}\n")
+            details.append("Total Episodes: ", style="bold cyan")
+            details.append(f"{count} episodes\n")
+            if entries and len(entries) > 0:
+                first_entry = entries[0]
+                first_title = first_entry.get("title", "Episode 1") if isinstance(first_entry, dict) else "Episode 1"
+                details.append("First Episode: ", style="dim cyan")
+                details.append(f"{first_title}\n")
+                if len(entries) > 1:
+                    last_entry = entries[-1]
+                    last_title = last_entry.get("title", f"Episode {len(entries)}") if isinstance(last_entry, dict) else f"Episode {len(entries)}"
+                    details.append("Latest Episode: ", style="dim cyan")
                     details.append(f"{last_title}\n")
         else:
             details.append("YouTube Playlist\n")
