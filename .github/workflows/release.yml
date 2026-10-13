@@ -1,66 +1,75 @@
-name: Build & Release Mobile APK
+name: Release Mobile APK
 
 on:
   push:
     tags:
       - 'v*'
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  build-and-release:
-    name: Build Android APK and Publish Release
+  publish-release:
+    name: Publish GitHub Release with APK
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
-      - name: Set up Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: 'temurin'
-          java-version: '17'
-
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
-
-      - name: Grant execute permission for gradlew
-        run: chmod +x android/gradlew
-
-      - name: Build Release APK
+      - name: Verify APK Asset
         run: |
-          cd android
-          ./gradlew assembleRelease --stacktrace
+          if [ ! -f "vdown.apk" ]; then
+            echo "Error: vdown.apk not found in repository root!"
+            exit 1
+          fi
+          echo "Found vdown.apk ($(ls -lh vdown.apk | awk '{print $5}'))"
 
-      - name: Copy and rename APK
+      - name: Publish Release to GitHub
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          cp android/app/build/outputs/apk/release/app-release.apk vdown.apk
+          TAG="${GITHUB_REF_NAME}"
+          if [ "${GITHUB_REF_TYPE}" != "tag" ]; then
+            TAG="v2.0.0"
+          fi
+          echo "Target Release Tag: ${TAG}"
 
-      - name: Create GitHub Release & Upload APK
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            vdown.apk
-            android/app/build/outputs/apk/release/app-release.apk
-          name: VDown Release ${{ github.ref_type == 'tag' && github.ref_name || 'v2.0.0' }}
-          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || 'v2.0.0' }}
-          draft: false
-          prerelease: false
-          generate_release_notes: true
-          body: |
-            ## VDown Release ${{ github.ref_type == 'tag' && github.ref_name || 'v2.0.0' }}
+          RELEASE_TITLE="VDown Release ${TAG}"
+          RELEASE_NOTES="## VDown Release ${TAG}
 
-            ### What's New
-            - **Native Android Companion App**: Full Material Design 3 app with dark/AMOLED theme, background downloading, in-app media player, and gallery integration.
-            - **Facebook Videos & Reels Engine**: Direct extraction of HD/SD CDN streams from Facebook reels, videos, and mobile `/share/r/` & `/share/v/` links without requiring login.
-            - **Android System Share Sheet**: Share any video or Reel directly from Facebook, TikTok, Instagram, YouTube, or browsers to VDown for instant one-tap downloading.
-            - **Studio-Quality Audio Extraction**: 320 kbps MP3, Lossless FLAC, M4A, and WAV extraction.
-            - **TikTok Watermark-Free Engine**: Clean MP4 video downloads and HD photo slideshows.
+A versatile media downloader available as both a Python CLI and a native Android companion app.
 
-            ### Downloads
-            - **Android APK**: Download [`vdown.apk`](https://github.com/dularacharith/vdown/releases/download/${{ github.ref_type == 'tag' && github.ref_name || 'v2.0.0' }}/vdown.apk) to install on your mobile device.
+### 🌟 What's New
+- 📱 **Native Android Companion App**: Full Material Design 3 app featuring dark/AMOLED theme, background downloading, in-app media player, and gallery integration.
+- ⚡ **Facebook Videos & Reels Engine**: Direct extraction of HD/SD CDN streams from Facebook reels, videos, and mobile \`/share/r/\` & \`/share/v/\` links without requiring login.
+- 🔗 **Android System Share Sheet**: Share any video or Reel directly from Facebook, TikTok, Instagram, YouTube, or web browsers to VDown for instant one-tap downloading.
+- 🎵 **Studio-Quality Audio Extraction**: 320 kbps MP3, Lossless FLAC, M4A, and WAV extraction.
+- 🎬 **TikTok Watermark-Free Engine**: Clean MP4 video downloads and HD photo slideshows.
+
+### 📥 Downloads
+- **Android APK**: Download [**vdown.apk**](https://github.com/dularacharith/vdown/releases/download/${TAG}/vdown.apk) to install directly on your Android device.
+
+---
+### 💻 Desktop Installation
+\`\`\`bash
+git clone https://github.com/dularacharith/vdown.git
+cd vdown
+./install.sh   # Linux / macOS
+install.bat    # Windows
+\`\`\`"
+
+          if gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "Release ${TAG} already exists. Updating notes and uploading vdown.apk..."
+            gh release edit "${TAG}" --title "${RELEASE_TITLE}" --notes "${RELEASE_NOTES}"
+            gh release upload "${TAG}" vdown.apk --clobber
+          else
+            echo "Creating new GitHub Release for ${TAG}..."
+            gh release create "${TAG}" vdown.apk \
+              --title "${RELEASE_TITLE}" \
+              --notes "${RELEASE_NOTES}" || gh release upload "${TAG}" vdown.apk --clobber
+          fi
+
+          echo "Release ${TAG} published successfully with vdown.apk!"

@@ -46,7 +46,7 @@ sudo apt install ffmpeg python3 python3-venv
 
 ### Linux / macOS
 ```bash
-git clone git@github.com:dularacharith/vdown.git
+git clone https://github.com/dularacharith/vdown.git
 cd vdown
 ./install.sh
 ```
@@ -54,7 +54,7 @@ This sets up a virtual environment and links `vdown` into `~/.local/bin/vdown`.
 
 ### Windows (CMD or PowerShell)
 ```cmd
-git clone git@github.com:dularacharith/vdown.git
+git clone https://github.com/dularacharith/vdown.git
 cd vdown
 install.bat
 ```
