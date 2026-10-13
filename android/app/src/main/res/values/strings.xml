@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">vdown</string>
+    <string name="app_tagline">Universal Media &amp; Video Downloader</string>
+
+    <!-- Navigation -->
+    <string name="nav_home">Downloader</string>
+    <string name="nav_downloads">Active</string>
+    <string name="nav_library">Library</string>
+    <string name="nav_settings">Settings</string>
+
+    <!-- Home Screen -->
+    <string name="hint_url">Paste video or audio link here…</string>
+    <string name="btn_paste">Paste</string>
+    <string name="btn_clear">Clear</string>
+    <string name="btn_fetch">Inspect Link</string>
+    <string name="fetching_info">Analyzing media link…</string>
+    <string name="error_empty_url">Please enter or paste a valid link.</string>
+    <string name="error_failed_fetch">Failed to extract media information. Check link or connection.</string>
+    <string name="clipboard_detected">Video link detected from clipboard!</string>
+    <string name="btn_use_link">Analyze</string>
+
+    <!-- Platform pills -->
+    <string name="platform_youtube">YouTube</string>
+    <string name="platform_tiktok">TikTok</string>
+    <string name="platform_instagram">Instagram</string>
+    <string name="platform_facebook">Facebook</string>
+    <string name="platform_twitter">X / Twitter</string>
+    <string name="platform_direct">Direct</string>
+
+    <!-- Format and Quality Options -->
+    <string name="section_formats">Select Format &amp; Quality</string>
+    <string name="type_video">Video (MP4)</string>
+    <string name="type_audio">Audio Extract</string>
+    <string name="quality_best">Best Available</string>
+    <string name="quality_1080p">1080p HD</string>
+    <string name="quality_720p">720p</string>
+    <string name="quality_480p">480p</string>
+    <string name="audio_mp3_320">MP3 320 kbps (Extreme)</string>
+    <string name="audio_mp3_256">MP3 256 kbps</string>
+    <string name="audio_mp3_192">MP3 192 kbps</string>
+    <string name="audio_mp3_128">MP3 128 kbps</string>
+    <string name="audio_flac">Lossless FLAC</string>
+    <string name="audio_m4a">M4A / AAC</string>
+    <string name="btn_start_download">Download Media</string>
+
+    <!-- Active Downloads -->
+    <string name="title_active_downloads">Active Downloads</string>
+    <string name="empty_downloads">No active downloads running</string>
+    <string name="status_downloading">Downloading…</string>
+    <string name="status_completed">Completed</string>
+    <string name="status_failed">Failed</string>
+    <string name="status_paused">Paused</string>
+    <string name="status_canceled">Canceled</string>
+    <string name="btn_cancel">Cancel</string>
+
+    <!-- Library -->
+    <string name="title_library">Media Library</string>
+    <string name="empty_library">No downloaded files yet</string>
+    <string name="btn_play">Play</string>
+    <string name="btn_share">Share</string>
+    <string name="btn_open">Open With</string>
+    <string name="btn_delete">Delete</string>
+    <string name="confirm_delete">Delete this file?</string>
+
+    <!-- Notifications -->
+    <string name="notification_channel_name">vdown Downloads</string>
+    <string name="notification_channel_desc">Shows ongoing download progress and speed</string>
+    <string name="notification_downloading">Downloading %1$s</string>
+    <string name="notification_complete">Download finished: %1$s</string>
+    <string name="notification_failed">Download failed: %1$s</string>
+
+    <!-- Settings -->
+    <string name="settings_title">Settings</string>
+    <string name="settings_download_dir_title">Download Directory</string>
+    <string name="settings_download_dir_summary">Downloads/vdown (Visible in Gallery &amp; Files)</string>
+    <string name="settings_default_quality_title">Default Video Quality</string>
+    <string name="settings_default_audio_title">Default Audio Bitrate</string>
+    <string name="settings_theme_title">Theme Mode</string>
+    <string name="settings_about_title">About vdown</string>
+    <string name="settings_about_desc">vdown Android v1.0.0 — Modern universal media and video downloader companion to vdown CLI.</string>
+</resources>

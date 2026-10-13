@@ -48,3 +48,15 @@ test_*/
 # OS artifacts
 .DS_Store
 Thumbs.db
+
+# Android
+.gradle/
+android/.gradle/
+android/local.properties
+android/*/build/
+android/app/build/
+android/.idea/
+android/*.iml
+android/*/*.iml
+.cxx/
+captures/

@@ -1,0 +1,66 @@
+name: Build & Release Mobile APK
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    name: Build Android APK and Publish Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x android/gradlew
+
+      - name: Build Release APK
+        run: |
+          cd android
+          ./gradlew assembleRelease --stacktrace
+
+      - name: Copy and rename APK
+        run: |
+          cp android/app/build/outputs/apk/release/app-release.apk vdown.apk
+
+      - name: Create GitHub Release & Upload APK
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            vdown.apk
+            android/app/build/outputs/apk/release/app-release.apk
+          name: VDown Release ${{ github.ref_type == 'tag' && github.ref_name || 'v2.0.0' }}
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || 'v2.0.0' }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          body: |
+            ## VDown Release ${{ github.ref_type == 'tag' && github.ref_name || 'v2.0.0' }}
+
+            ### What's New
+            - **Native Android Companion App**: Full Material Design 3 app with dark/AMOLED theme, background downloading, in-app media player, and gallery integration.
+            - **Facebook Videos & Reels Engine**: Direct extraction of HD/SD CDN streams from Facebook reels, videos, and mobile `/share/r/` & `/share/v/` links without requiring login.
+            - **Android System Share Sheet**: Share any video or Reel directly from Facebook, TikTok, Instagram, YouTube, or browsers to VDown for instant one-tap downloading.
+            - **Studio-Quality Audio Extraction**: 320 kbps MP3, Lossless FLAC, M4A, and WAV extraction.
+            - **TikTok Watermark-Free Engine**: Clean MP4 video downloads and HD photo slideshows.
+
+            ### Downloads
+            - **Android APK**: Download [`vdown.apk`](https://github.com/dularacharith/vdown/releases/download/${{ github.ref_type == 'tag' && github.ref_name || 'v2.0.0' }}/vdown.apk) to install on your mobile device.

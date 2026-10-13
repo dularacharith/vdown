@@ -17,6 +17,7 @@ from rich.progress import (
 )
 
 from simple_downloader.direct_downloader import DirectDownloader
+from simple_downloader.facebook import FacebookDownloader, is_facebook_url
 from simple_downloader.scraper import WebpageVideoScraper
 from simple_downloader.tiktok import TikTokDownloader, is_tiktok_url
 from simple_downloader.utils import (
@@ -55,6 +56,16 @@ class DownloadEngine:
                 tt_info = tt.get_info(url)
                 if tt_info:
                     return tt_info
+            except Exception:
+                pass
+
+        # Specialized Facebook handler (videos, reels, and mobile share links)
+        if is_facebook_url(url):
+            try:
+                fb = FacebookDownloader()
+                fb_info = fb.get_info(url, browser=browser, cookie_file=cookie_file)
+                if fb_info:
+                    return fb_info
             except Exception:
                 pass
 
@@ -261,6 +272,23 @@ class DownloadEngine:
         # If info indicated direct stream or scraper extracted an embedded stream URL
         if info and info.get("is_direct"):
             target_download_url = info.get("url") or url
+            if format_id and info.get("formats"):
+                for fmt in info["formats"]:
+                    if fmt.get("format_id") == format_id:
+                        target_download_url = fmt.get("url") or target_download_url
+                        break
+            elif quality and info.get("formats"):
+                if str(quality).lower() in ("sd", "worst", "low", "360p", "480p"):
+                    for fmt in info["formats"]:
+                        if fmt.get("format_id") == "sd":
+                            target_download_url = fmt.get("url") or target_download_url
+                            break
+
+            if not output_path and info.get("title") and info.get("title") not in ("direct_stream", "embedded_media"):
+                safe_title = sanitize_filename(info.get("title"))
+                if safe_title:
+                    output_path = f"{safe_title}.mp4"
+
             downloader = DirectDownloader(rate_limit=rate_limit)
             if audio_only:
                 import tempfile
@@ -319,6 +347,7 @@ class DownloadEngine:
                 )
 
         # 2. Build yt-dlp options
+        target_dl_url = (info.get("normalized_url") if info else None) or url
         dest_dir = Path(output_dir or "downloads").expanduser().resolve()
         dest_dir.mkdir(parents=True, exist_ok=True)
 
@@ -521,7 +550,7 @@ class DownloadEngine:
             try:
                 with progress:
                     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                        ret_code = ydl.download([url])
+                        ret_code = ydl.download([target_dl_url])
                         if ret_code != 0:
                             raise RuntimeError(f"Download failed with exit code {ret_code}")
                 if playlist and downloaded_files:
@@ -575,7 +604,7 @@ class DownloadEngine:
                 raise e
         else:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([url])
+                ydl.download([target_dl_url])
             if playlist and downloaded_files:
                 if len(downloaded_files) > 1:
                     common_dir = os.path.dirname(downloaded_files[0])

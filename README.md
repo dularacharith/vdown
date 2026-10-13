@@ -1,6 +1,13 @@
 # vdown
 
-A fast, versatile command-line video and media downloader. Download videos, audio, streams, and direct media files from virtually any link on the web.
+[![Release](https://img.shields.io/github/v/release/dularacharith/vdown?include_prereleases&style=for-the-badge&logo=github&color=8B5CF6)](https://github.com/dularacharith/vdown/releases/latest)
+[![Download APK](https://img.shields.io/badge/Download-Android%20APK%20(v2.0.0)-00C853?style=for-the-badge&logo=android&logoColor=white)](https://github.com/dularacharith/vdown/releases/latest/download/vdown.apk)
+[![License: MIT](https://img.shields.io/badge/License-MIT-06B6D4?style=for-the-badge)](LICENSE)
+
+A fast, versatile media downloader available as both a **powerful command-line tool** (Python) and a **modern native mobile app** (Android). Download videos, audio, streams, and direct media files from virtually any link on the web.
+
+> 📱 **Looking for the Android App?**
+> Download the prebuilt release APK directly: [**Download vdown.apk**](https://github.com/dularacharith/vdown/releases/latest/download/vdown.apk) or grab it from the repository root: [`vdown.apk`](vdown.apk).
 
 ## Features
 
@@ -160,4 +167,36 @@ Run unit and integration tests:
 
 ```bash
 .venv/bin/python -m unittest discover tests
+```
+
+---
+
+## Android App
+
+A companion native Android application for **vdown** is included in the [`android/`](file:///home/dularacharith/Documents/Git/vdown/android) directory, with a ready-to-install build at [`vdown.apk`](file:///home/dularacharith/Documents/Git/vdown/vdown.apk).
+
+### Android Features
+- **Modern Material 3 UI**: Clean dark / AMOLED theme with intuitive tab navigation (**Downloader**, **Active**, **Library**, **Settings**).
+- **Universal Downloader**: Downloads TikTok watermark-free videos & soundtrack, YouTube, Instagram reels, Facebook videos, Twitter/X, and direct streams.
+- **Audio Extraction**: Extracts audio directly to 320 kbps MP3, Lossless FLAC, or M4A.
+- **System Share Target**: Tap "Share" from YouTube, TikTok, Instagram, Twitter/X, or Chrome, and choose **vdown** to instantly parse the link.
+- **Clipboard Auto-Detection**: Detects copied media links on app open and offers one-tap inspection.
+- **Background Download Service**: Downloads continue in the background with real-time speed (MB/s), progress percentage, and ETA notification.
+- **MediaStore & Gallery Integration**: Saves directly to `Downloads/vdown` so videos and music immediately show up in your device's Gallery, VLC, and Music player.
+- **Built-in Media Player**: Play videos and audios directly inside the app, or share them to other apps.
+
+### Installing the APK
+- **GitHub Release (Recommended)**: [Download Latest vdown.apk](https://github.com/dularacharith/vdown/releases/latest/download/vdown.apk)
+- **Repository Direct Download**: [`vdown.apk`](vdown.apk)
+- **Via ADB (USB debugging)**:
+  ```bash
+  adb install -r vdown.apk
+  ```
+
+### Building from Source
+```bash
+cd android
+chmod +x gradlew
+./gradlew assembleRelease
+# Output APK will be at android/app/build/outputs/apk/release/app-release.apk
 ```
