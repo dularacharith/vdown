@@ -37,39 +37,15 @@ jobs:
           fi
           echo "Target Release Tag: ${TAG}"
 
-          RELEASE_TITLE="VDown Release ${TAG}"
-          RELEASE_NOTES="## VDown Release ${TAG}
-
-A versatile media downloader available as both a Python CLI and a native Android companion app.
-
-### 🌟 What's New
-- 📱 **Native Android Companion App**: Full Material Design 3 app featuring dark/AMOLED theme, background downloading, in-app media player, and gallery integration.
-- ⚡ **Facebook Videos & Reels Engine**: Direct extraction of HD/SD CDN streams from Facebook reels, videos, and mobile \`/share/r/\` & \`/share/v/\` links without requiring login.
-- 🔗 **Android System Share Sheet**: Share any video or Reel directly from Facebook, TikTok, Instagram, YouTube, or web browsers to VDown for instant one-tap downloading.
-- 🎵 **Studio-Quality Audio Extraction**: 320 kbps MP3, Lossless FLAC, M4A, and WAV extraction.
-- 🎬 **TikTok Watermark-Free Engine**: Clean MP4 video downloads and HD photo slideshows.
-
-### 📥 Downloads
-- **Android APK**: Download [**vdown.apk**](https://github.com/dularacharith/vdown/releases/download/${TAG}/vdown.apk) to install directly on your Android device.
-
----
-### 💻 Desktop Installation
-\`\`\`bash
-git clone https://github.com/dularacharith/vdown.git
-cd vdown
-./install.sh   # Linux / macOS
-install.bat    # Windows
-\`\`\`"
-
           if gh release view "${TAG}" >/dev/null 2>&1; then
             echo "Release ${TAG} already exists. Updating notes and uploading vdown.apk..."
-            gh release edit "${TAG}" --title "${RELEASE_TITLE}" --notes "${RELEASE_NOTES}"
+            gh release edit "${TAG}" --title "VDown Release ${TAG}" --notes-file .github/release_notes.md
             gh release upload "${TAG}" vdown.apk --clobber
           else
             echo "Creating new GitHub Release for ${TAG}..."
             gh release create "${TAG}" vdown.apk \
-              --title "${RELEASE_TITLE}" \
-              --notes "${RELEASE_NOTES}" || gh release upload "${TAG}" vdown.apk --clobber
+              --title "VDown Release ${TAG}" \
+              --notes-file .github/release_notes.md || gh release upload "${TAG}" vdown.apk --clobber
           fi
 
           echo "Release ${TAG} published successfully with vdown.apk!"
