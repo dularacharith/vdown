@@ -3,8 +3,9 @@ set -e
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BIN_DIR="$HOME/.local/bin"
+DESKTOP_DIR="$HOME/.local/share/applications"
 
-echo "=== Installing Simple Downloader (vdown) ==="
+echo "=== Installing VDown (CLI & Desktop GUI) ==="
 
 # Check Python 3
 if ! command -v python3 >/dev/null 2>&1; then
@@ -19,19 +20,30 @@ if [ ! -d "$REPO_DIR/.venv" ]; then
 fi
 
 # Install dependencies in venv
-echo "Installing dependencies..."
+echo "Installing dependencies (including PyQt6 for Desktop GUI)..."
 "$REPO_DIR/.venv/bin/python" -m pip install -e "$REPO_DIR"
 
-# Ensure vdown is executable
+# Ensure launchers are executable
 chmod +x "$REPO_DIR/vdown"
+chmod +x "$REPO_DIR/vdown-gui"
 
 # Create ~/.local/bin if not exists
 mkdir -p "$BIN_DIR"
 
-# Create symlink in ~/.local/bin
+# Create symlinks in ~/.local/bin
 ln -sf "$REPO_DIR/vdown" "$BIN_DIR/vdown"
+ln -sf "$REPO_DIR/vdown-gui" "$BIN_DIR/vdown-gui"
+
+# Install desktop shortcut
+if [ -f "$REPO_DIR/vdown.desktop" ]; then
+    mkdir -p "$DESKTOP_DIR"
+    cp "$REPO_DIR/vdown.desktop" "$DESKTOP_DIR/vdown.desktop"
+    sed -i "s|Exec=vdown-gui|Exec=$BIN_DIR/vdown-gui|g" "$DESKTOP_DIR/vdown.desktop"
+fi
 
 echo ""
 echo "✔ Installation complete!"
-echo "You can now run 'vdown' from anywhere in your terminal."
-echo "Try: vdown --help"
+echo "You can now run:"
+echo "  - 'vdown' (Command Line Interface)"
+echo "  - 'vdown-gui' (Modern Desktop GUI Application)"
+echo "  - Or launch VDown from your desktop application launcher!"

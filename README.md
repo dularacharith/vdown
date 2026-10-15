@@ -4,22 +4,24 @@
 [![Download APK](https://img.shields.io/badge/Download-Android%20APK%20(v2.0.0)-00C853?style=for-the-badge&logo=android&logoColor=white)](https://github.com/dularacharith/vdown/releases/latest/download/vdown.apk)
 [![License: MIT](https://img.shields.io/badge/License-MIT-06B6D4?style=for-the-badge)](LICENSE)
 
-A fast, versatile media downloader available as both a **powerful command-line tool** (Python) and a **modern native mobile app** (Android). Download videos, audio, streams, and direct media files from virtually any link on the web.
+A fast, versatile media downloader available as a **modern desktop GUI application** (Windows/Linux/macOS), a **powerful command-line tool** (Python), and a **native mobile app** (Android). Download videos, audio, streams, and direct media files from virtually any link on the web.
 
+> 🖥️ **Desktop GUI App**: Launch via `vdown-gui` (or `vdown-gui.bat` on Windows).
 > 📱 **Looking for the Android App?**
 > Download the prebuilt release APK directly: [**Download vdown.apk**](https://github.com/dularacharith/vdown/releases/latest/download/vdown.apk) or grab it from the repository root: [`vdown.apk`](vdown.apk).
 
 ## Features
 
+- **Desktop GUI Application**: Full-featured PyQt6 desktop interface with Dark/AMOLED theme, format selectors, live download speed, ETA countdown, and library history.
 - **Universal Link Support**: Downloads from YouTube, Facebook, Instagram, TikTok (without watermark), Twitter/X, Vimeo, Reddit, Twitch, and 1800+ other platforms.
+- **Firefox & Browser Cookie Auto-Detection**: Automatically detects active session cookies from **Mozilla Firefox**, **Google Chrome**, **Brave**, and **Microsoft Edge** to seamlessly bypass bot checks and download login-protected/age-gated media.
 - **YouTube Playlists**: Downloads complete playlists or specific track ranges into organized folders with track numbers (`01 - Title.mp4`).
 - **Studio-Quality Audio Extraction**: Extract audio in lossless **FLAC** (bit-perfect studio quality), **320 kbps MP3** (extreme high quality), **M4A/AAC**, **WAV** (lossless uncompressed PCM), and **OPUS**.
 - **Interactive Audio Menu**: Select formats and bitrates (320k, 256k, 192k, 128k, VBR, custom) directly from a guided wizard.
 - **TikTok Engine**: Downloads videos without watermarks, and turns photo carousels into HD video slideshows with background audio.
-- **Browser Cookies**: Access private, login-protected, or age-gated media via `--browser chromium` (or `brave`, `chrome`, `firefox`).
 - **Webpage Scraper**: Automatically finds and extracts embedded video streams on arbitrary websites and blogs.
-- **Direct Streaming & Resumes**: Resumable HTTP/HTTPS file downloads with `Range: bytes=` support.
-- **Real-Time Speed & ETA**: Terminal progress bar displaying speed in **MB/s** (and Mbps) with dynamic countdown.
+- **Direct Streaming & Resumes**: Resumable HTTP/HTTPS file downloads with `Range: bytes=` support and strict Content-Type validation.
+- **Real-Time Speed & ETA**: Dynamic progress bar displaying speed in **MB/s** (and Mbps) with live countdown.
 
 ---
 
@@ -50,7 +52,7 @@ git clone https://github.com/dularacharith/vdown.git
 cd vdown
 ./install.sh
 ```
-This sets up a virtual environment and links `vdown` into `~/.local/bin/vdown`.
+This sets up a virtual environment and creates symlinks for `vdown` (CLI) and `vdown-gui` (Desktop GUI) in `~/.local/bin/`.
 
 ### Windows (CMD or PowerShell)
 ```cmd
@@ -58,14 +60,34 @@ git clone https://github.com/dularacharith/vdown.git
 cd vdown
 install.bat
 ```
-After running `install.bat`, you can run `.\vdown.bat` directly or add `.venv\Scripts` to your system PATH.
+After running `install.bat`, you can launch:
+- `.\vdown-gui.bat` for the **Modern Desktop GUI**
+- `.\vdown.bat` for the **Command Line Interface**
 
 ---
 
 ## Usage
 
-### 1. Interactive Mode
-Run `vdown` without arguments for a guided wizard:
+### 1. Modern Desktop GUI Application
+Launch the graphical interface anytime:
+```bash
+# On Linux / macOS:
+vdown-gui
+# Or via CLI flag:
+vdown --gui
+
+# On Windows:
+.\vdown-gui.bat
+```
+The GUI features:
+- One-click clipboard pasting and link inspection
+- Auto-detected browser cookie badges (e.g. **Firefox**)
+- Stream format & quality selectors
+- Real-time download progress bar with speed (MB/s and Mbps) and ETA
+- Downloaded media library with direct play and show in folder actions
+
+### 2. Interactive CLI Mode
+Run `vdown` without arguments for a guided terminal wizard:
 ```bash
 vdown
 ```
@@ -154,7 +176,8 @@ vdown -b links.txt -d ~/Downloads
 | `-o`, `--output` | Custom destination filename | Auto |
 | `-d`, `--dir` | Output directory path | `downloads` |
 | `-b`, `--batch` | Text file containing list of URLs to download | None |
-| `--browser` | Extract cookies from browser (`chromium`, `brave`, `chrome`, `firefox`) | None |
+| `--gui` | Launch modern graphical desktop interface | Disabled |
+| `--browser` | Extract cookies from browser (`auto`, `firefox`, `chrome`, `brave`, `edge`) | Auto-retry on bot check |
 | `--cookies` | Path to Netscape-format cookies file | None |
 | `--proxy` | HTTP/HTTPS/SOCKS5 proxy URL | None |
 | `--rate-limit` | Speed limit cap (e.g. `5M`, `500K`) | Unlimited |

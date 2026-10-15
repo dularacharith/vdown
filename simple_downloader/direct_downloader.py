@@ -133,6 +133,13 @@ class DirectDownloader:
         elif resp.status_code >= 400:
             resp.raise_for_status()
 
+        # Reject HTML webpages or JSON responses (prevent downloading webpage as a fake media file)
+        resp_ct = (resp.headers.get("content-type") or "").lower()
+        if any(resp_ct.startswith(bad_ct) for bad_ct in ["text/html", "text/plain", "application/json", "application/xhtml+xml"]):
+            raise ValueError(
+                f"Direct media download failed: URL returned an HTML webpage or document ({resp_ct}), not a media stream."
+            )
+
         # Update filename if not explicitly provided and we now have better response headers
         if not output_path and not response_headers:
             better_name = get_filename_from_headers_or_url(url, resp.headers)

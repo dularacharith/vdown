@@ -11,6 +11,7 @@ from rich.panel import Panel
 from rich.text import Text
 
 from simple_downloader import __version__
+from simple_downloader.browser_cookies import get_best_browser, get_browser_cookie_summary
 from simple_downloader.engine import DownloadEngine
 from simple_downloader.info import display_media_info, display_formats_table
 from simple_downloader.utils import parse_speed_limit, format_bytes
@@ -105,8 +106,14 @@ def create_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--browser", "--cookies-from-browser",
         dest="browser",
-        choices=["chromium", "brave", "chrome", "firefox", "edge", "opera", "vivaldi", "safari"],
-        help="Extract session cookies from browser for login-protected sites (Instagram, Facebook, YouTube)",
+        choices=["auto", "firefox", "chrome", "brave", "edge", "chromium", "opera", "vivaldi", "safari"],
+        help="Extract session cookies from browser for login-protected sites (auto, firefox, chrome, brave)",
+    )
+
+    parser.add_argument(
+        "--gui",
+        action="store_true",
+        help="Launch the modern graphical desktop interface",
     )
 
     parser.add_argument(
@@ -225,16 +232,27 @@ def _run_interactive_mode_impl(engine: DownloadEngine, initial_url: Optional[str
         return 1
 
     browser = None
-    # For social platforms that frequently require cookies (Instagram, Facebook)
-    is_social = any(domain in url.lower() for domain in ["instagram.com", "facebook.com", "fb.watch"])
+    # For social platforms that frequently require cookies (YouTube, Instagram, Facebook, TikTok, etc.)
+    is_social = any(domain in url.lower() for domain in ["youtube.com", "youtu.be", "instagram.com", "facebook.com", "fb.watch", "tiktok.com", "x.com", "twitter.com"])
     if is_social:
-        console.print("[dim]Note: Instagram & Facebook often require cookies for private videos/reels.[/dim]")
-        if Confirm.ask("Use cookies from an installed browser?", default=False):
-            browser = Prompt.ask(
-                "Select browser",
-                choices=["chromium", "brave", "chrome", "firefox", "edge", "opera"],
-                default="chromium",
-            )
+        best_b = get_best_browser()
+        if best_b:
+            summary = get_browser_cookie_summary()
+            if Confirm.ask(f"Use session cookies from detected browser ([bold cyan]{summary}[/bold cyan])?", default=True):
+                browser = "auto"
+            elif Confirm.ask("Select a specific browser for cookies?", default=False):
+                browser = Prompt.ask(
+                    "Select browser",
+                    choices=["auto", "firefox", "chrome", "brave", "edge", "chromium", "opera", "vivaldi"],
+                    default=best_b,
+                )
+        else:
+            if Confirm.ask("Use cookies from an installed browser?", default=False):
+                browser = Prompt.ask(
+                    "Select browser",
+                    choices=["auto", "firefox", "chrome", "brave", "edge", "chromium", "opera", "vivaldi"],
+                    default="firefox",
+                )
 
     with console.status("[cyan]Analyzing media link...[/cyan]"):
         try:
@@ -558,6 +576,11 @@ def main(argv: Optional[List[str]] = None) -> int:
     try:
         parser = create_parser()
         args = parser.parse_args(argv)
+
+        # Launch Graphical Desktop Application if --gui requested
+        if getattr(args, "gui", False):
+            from simple_downloader.gui.app import main as gui_main
+            return gui_main()
 
         engine = DownloadEngine(console_instance=console)
 

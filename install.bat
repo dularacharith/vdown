@@ -1,6 +1,6 @@
 @echo off
 setlocal
-echo === Installing Simple Downloader (vdown) on Windows ===
+echo === Installing VDown (CLI & Desktop GUI) on Windows ===
 
 where python >nul 2>nul
 if %ERRORLEVEL% neq 0 (
@@ -23,12 +23,13 @@ if not exist ".venv" (
     python -m venv .venv
 )
 
-echo Installing dependencies...
+echo Installing dependencies (including PyQt6 for Desktop GUI)...
 call .venv\Scripts\python.exe -m pip install --upgrade pip
 call .venv\Scripts\python.exe -m pip install -e .
 
 echo.
 echo [OK] Installation complete!
-echo You can run vdown using:
-echo   - .\vdown.bat [options]
-echo   - Or activate the environment: .\.venv\Scripts\activate ^& vdown [options]
+echo You can run VDown using:
+echo   - .\vdown-gui.bat               (Launch Modern Desktop GUI)
+echo   - .\vdown.bat [options]         (Launch Command Line Interface)
+echo   - Or activate the environment: .\.venv\Scripts\activate ^& vdown-gui

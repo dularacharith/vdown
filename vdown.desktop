@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=VDown
+Comment=Universal Video & Media Downloader
+Exec=vdown-gui
+Terminal=false
+Type=Application
+Categories=AudioVideo;Network;
+Keywords=video;downloader;youtube;tiktok;facebook;instagram;

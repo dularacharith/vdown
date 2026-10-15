@@ -16,6 +16,9 @@ from rich.progress import (
     TimeRemainingColumn,
 )
 
+import shutil
+from typing import Optional, Dict, Any, List, Tuple, Callable
+from simple_downloader.browser_cookies import get_best_browser, detect_available_browsers
 from simple_downloader.direct_downloader import DirectDownloader
 from simple_downloader.facebook import FacebookDownloader, is_facebook_url
 from simple_downloader.scraper import WebpageVideoScraper
@@ -28,6 +31,58 @@ from simple_downloader.utils import (
 )
 
 console = Console()
+
+KNOWN_SOCIAL_DOMAINS = [
+    "youtube.com", "youtu.be",
+    "facebook.com", "fb.watch", "fb.com",
+    "instagram.com",
+    "tiktok.com",
+    "twitter.com", "x.com",
+    "reddit.com",
+    "vimeo.com",
+    "twitch.tv",
+]
+
+
+def _build_base_ydl_opts(
+    browser: Optional[str] = None,
+    cookie_file: Optional[str] = None,
+    proxy: Optional[str] = None,
+    user_agent: Optional[str] = None,
+    referer: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Construct common yt-dlp options with JS runtimes and cookie handling."""
+    opts: Dict[str, Any] = {
+        "remote_components": {"ejs:github": True},
+    }
+
+    # Discover and configure supported JS runtimes (Node.js or Deno)
+    if shutil.which("node"):
+        opts["js_runtimes"] = {"node": {}}
+    elif shutil.which("deno"):
+        opts["js_runtimes"] = {"deno": {}}
+
+    # Handle browser cookies (including auto-detection)
+    target_browser = browser
+    if browser == "auto":
+        target_browser = get_best_browser()
+
+    if target_browser:
+        opts["cookiesfrombrowser"] = (target_browser,)
+    if cookie_file:
+        opts["cookiefile"] = cookie_file
+    if proxy:
+        opts["proxy"] = proxy
+
+    if user_agent or referer:
+        headers = {}
+        if user_agent:
+            headers["User-Agent"] = user_agent
+        if referer:
+            headers["Referer"] = referer
+        opts["http_headers"] = headers
+
+    return opts
 
 
 class DownloadEngine:
@@ -69,26 +124,19 @@ class DownloadEngine:
             except Exception:
                 pass
 
-        ydl_opts: Dict[str, Any] = {
+        ydl_opts = _build_base_ydl_opts(
+            browser=browser,
+            cookie_file=cookie_file,
+            proxy=proxy,
+            user_agent=user_agent,
+            referer=referer,
+        )
+        ydl_opts.update({
             "quiet": True,
             "no_warnings": True,
             "extract_flat": "in_playlist",
             "skip_download": True,
-        }
-
-        if browser:
-            ydl_opts["cookiesfrombrowser"] = (browser,)
-        if cookie_file:
-            ydl_opts["cookiefile"] = cookie_file
-        if proxy:
-            ydl_opts["proxy"] = proxy
-        if user_agent or referer:
-            headers = {}
-            if user_agent:
-                headers["User-Agent"] = user_agent
-            if referer:
-                headers["Referer"] = referer
-            ydl_opts["http_headers"] = headers
+        })
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -109,8 +157,25 @@ class DownloadEngine:
         except Exception as e:
             err_str = str(e).lower()
             if any(k in err_str for k in ["login required", "bot", "confirm you're not a bot", "private video", "sign in", "401"]):
+                # Try auto-detecting browser cookies if not already specified
+                if not browser or browser == "auto":
+                    best_b = get_best_browser()
+                    if best_b:
+                        self.console.print(f"\n[cyan]Detected {best_b.capitalize()} session cookies. Retrying with {best_b}...[/cyan]")
+                        return self.get_media_info(
+                            url=url,
+                            browser=best_b,
+                            cookie_file=cookie_file,
+                            proxy=proxy,
+                            user_agent=user_agent,
+                            referer=referer,
+                        )
                 self.console.print("\n[bold yellow]⚠ Authentication or anti-bot verification required.[/bold yellow]")
-                self.console.print("[dim]Tip: Pass cookies from your browser, e.g. --browser chromium (or brave, chrome)[/dim]")
+                self.console.print("[dim]Tip: Pass cookies from your browser, e.g. --browser firefox (or chrome, brave)[/dim]")
+
+            # Isolate known social platforms from falling back to arbitrary scrapers
+            if any(domain in url.lower() for domain in KNOWN_SOCIAL_DOMAINS):
+                raise RuntimeError(f"Could not extract info from URL: {e}")
 
         # 2. Try scraping embedded videos from arbitrary webpage
         try:
@@ -236,6 +301,7 @@ class DownloadEngine:
         user_agent: Optional[str] = None,
         referer: Optional[str] = None,
         show_progress: bool = True,
+        progress_callback: Optional[Callable[[Dict[str, Any]], None]] = None,
     ) -> Optional[str]:
         """Execute the download using the most appropriate engine."""
         # 1. Inspect URL info
@@ -376,29 +442,20 @@ class DownloadEngine:
         else:
             out_template = str(dest_dir / "%(title).200B [%(id)s].%(ext)s")
 
-        ydl_opts: Dict[str, Any] = {
+        ydl_opts = _build_base_ydl_opts(
+            browser=browser,
+            cookie_file=cookie_file,
+            proxy=proxy,
+            user_agent=user_agent,
+            referer=referer,
+        )
+        ydl_opts.update({
             "outtmpl": out_template,
             "quiet": True,
             "noprogress": True,
             "no_warnings": True,
             "noplaylist": not playlist,
-        }
-
-        # Browser cookies and proxies
-        if browser:
-            ydl_opts["cookiesfrombrowser"] = (browser,)
-        if cookie_file:
-            ydl_opts["cookiefile"] = cookie_file
-        if proxy:
-            ydl_opts["proxy"] = proxy
-
-        if user_agent or referer:
-            headers = {}
-            if user_agent:
-                headers["User-Agent"] = user_agent
-            if referer:
-                headers["Referer"] = referer
-            ydl_opts["http_headers"] = headers
+        })
 
         if playlist_items:
             ydl_opts["playlist_items"] = playlist_items
@@ -516,7 +573,13 @@ class DownloadEngine:
                         eta=eta,
                     )
 
-            elif status == "finished":
+            if progress_callback:
+                try:
+                    progress_callback(d)
+                except Exception:
+                    pass
+
+            if status == "finished":
                 fn = d.get("filename")
                 if fn:
                     last_file_downloaded = fn
@@ -537,77 +600,115 @@ class DownloadEngine:
                     last_file_downloaded = filepath
                     if filepath not in downloaded_files:
                         downloaded_files.append(filepath)
+            if progress_callback:
+                try:
+                    progress_callback(d)
+                except Exception:
+                    pass
 
         ydl_opts["postprocessor_hooks"] = [ydl_postprocessor_hook]
+        ydl_opts["progress_hooks"] = [ydl_progress_hook]
 
-        if show_progress:
-            from simple_downloader.progress import create_download_progress
+        try:
+            if show_progress:
+                from simple_downloader.progress import create_download_progress
 
-            progress = create_download_progress(show_progress=True)
-            task_tracker: Dict[str, Any] = {}
-            ydl_opts["progress_hooks"] = [ydl_progress_hook]
+                progress = create_download_progress(show_progress=True)
+                task_tracker: Dict[str, Any] = {}
 
-            try:
                 with progress:
                     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                         ret_code = ydl.download([target_dl_url])
-                        if ret_code != 0:
+                        if isinstance(ret_code, int) and ret_code != 0:
                             raise RuntimeError(f"Download failed with exit code {ret_code}")
-                if playlist and downloaded_files:
-                    if len(downloaded_files) > 1:
-                        common_dir = os.path.dirname(downloaded_files[0])
-                        return common_dir if common_dir and os.path.isdir(common_dir) else last_file_downloaded
-                    return downloaded_files[0]
-                return last_file_downloaded
+            else:
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    ret_code = ydl.download([target_dl_url])
+                    if isinstance(ret_code, int) and ret_code != 0:
+                        raise RuntimeError(f"Download failed with exit code {ret_code}")
 
-            except Exception as e:
-                err_str = str(e).lower()
-                if any(k in err_str for k in ["login required", "bot", "confirm you're not a bot", "private video", "sign in", "401"]):
-                    self.console.print("\n[bold yellow]⚠ This platform requires authentication or session cookies.[/bold yellow]")
-                    self.console.print("[dim]Tip: Retry with your browser session, e.g.:[/dim]")
-                    self.console.print("  [cyan]vdown \"<link>\" --browser chromium[/cyan]")
-                    self.console.print("  [cyan]vdown \"<link>\" --browser brave[/cyan]")
-                    self.console.print("  [cyan]vdown \"<link>\" --browser chrome[/cyan]\n")
-
-                # Fallback: Try webpage video scraper
-                scraper = WebpageVideoScraper(headers={"User-Agent": user_agent} if user_agent else None)
-                candidates = scraper.find_videos(url)
-                if candidates:
-                    self.console.print(f"[yellow]Searching embedded videos on page... found {len(candidates)} candidates.[/yellow]")
-                    for cand in candidates:
-                        try:
-                            return self.download(
-                                url=cand["url"],
-                                output_path=output_path,
-                                output_dir=output_dir or "downloads",
-                                quality=quality,
-                                format_id=format_id,
-                                audio_only=audio_only,
-                                audio_format=audio_format,
-                                video_format=video_format,
-                                rate_limit=rate_limit,
-                                show_progress=show_progress,
-                            )
-                        except Exception:
-                            continue
-
-                # Fallback: Direct HTTP downloader
-                if is_direct_media_url(url) or "http" in url:
-                    self.console.print("[yellow]Trying direct HTTP streaming downloader...[/yellow]")
-                    downloader = DirectDownloader(rate_limit=rate_limit)
-                    return downloader.download(
-                        url=url,
-                        output_path=output_path,
-                        output_dir=output_dir or "downloads",
-                        show_progress=show_progress,
-                    )
-                raise e
-        else:
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                ydl.download([target_dl_url])
             if playlist and downloaded_files:
                 if len(downloaded_files) > 1:
                     common_dir = os.path.dirname(downloaded_files[0])
                     return common_dir if common_dir and os.path.isdir(common_dir) else last_file_downloaded
                 return downloaded_files[0]
             return last_file_downloaded
+
+        except Exception as e:
+            err_str = str(e).lower()
+            if any(k in err_str for k in ["login required", "bot", "confirm you're not a bot", "private video", "sign in", "401"]):
+                # Try auto-detecting browser cookies if not explicitly configured
+                if not browser or browser == "auto":
+                    best_b = get_best_browser()
+                    if best_b:
+                        self.console.print(f"\n[bold cyan]🔄 Detected {best_b.capitalize()} session cookies. Automatically retrying with {best_b}...[/bold cyan]")
+                        return self.download(
+                            url=url,
+                            output_path=output_path,
+                            output_dir=output_dir,
+                            quality=quality,
+                            format_id=format_id,
+                            audio_only=audio_only,
+                            audio_format=audio_format,
+                            audio_quality=audio_quality,
+                            video_format=video_format,
+                            rate_limit=rate_limit,
+                            subtitles=subtitles,
+                            sub_lang=sub_lang,
+                            embed_subs=embed_subs,
+                            embed_thumbnail=embed_thumbnail,
+                            embed_metadata=embed_metadata,
+                            playlist=playlist,
+                            playlist_items=playlist_items,
+                            browser=best_b,
+                            cookie_file=cookie_file,
+                            proxy=proxy,
+                            user_agent=user_agent,
+                            referer=referer,
+                            show_progress=show_progress,
+                            progress_callback=progress_callback,
+                        )
+                self.console.print("\n[bold yellow]⚠ This platform requires authentication or session cookies.[/bold yellow]")
+                self.console.print("[dim]Tip: Retry with your browser session, e.g.:[/dim]")
+                self.console.print("  [cyan]vdown \"<link>\" --browser firefox[/cyan]")
+                self.console.print("  [cyan]vdown \"<link>\" --browser chrome[/cyan]")
+                self.console.print("  [cyan]vdown \"<link>\" --browser brave[/cyan]\n")
+
+            # Isolate social media platforms: never fall through to scraper or direct downloader
+            if any(domain in url.lower() for domain in KNOWN_SOCIAL_DOMAINS):
+                raise e
+
+            # Fallback: Try webpage video scraper (only for arbitrary blog/news sites)
+            scraper = WebpageVideoScraper(headers={"User-Agent": user_agent} if user_agent else None)
+            candidates = scraper.find_videos(url)
+            if candidates:
+                self.console.print(f"[yellow]Searching embedded videos on page... found {len(candidates)} candidates.[/yellow]")
+                for cand in candidates:
+                    try:
+                        return self.download(
+                            url=cand["url"],
+                            output_path=output_path,
+                            output_dir=output_dir or "downloads",
+                            quality=quality,
+                            format_id=format_id,
+                            audio_only=audio_only,
+                            audio_format=audio_format,
+                            video_format=video_format,
+                            rate_limit=rate_limit,
+                            show_progress=show_progress,
+                            progress_callback=progress_callback,
+                        )
+                    except Exception:
+                        continue
+
+            # Fallback: Direct HTTP downloader (ONLY for direct media file URLs)
+            if is_direct_media_url(url):
+                self.console.print("[yellow]Trying direct HTTP streaming downloader...[/yellow]")
+                downloader = DirectDownloader(rate_limit=rate_limit)
+                return downloader.download(
+                    url=url,
+                    output_path=output_path,
+                    output_dir=output_dir or "downloads",
+                    show_progress=show_progress,
+                )
+            raise e
