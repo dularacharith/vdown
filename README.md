@@ -1,14 +1,14 @@
 # vdown
 
 [![Release](https://img.shields.io/github/v/release/dularacharith/vdown?include_prereleases&style=for-the-badge&logo=github&color=8B5CF6)](https://github.com/dularacharith/vdown/releases/latest)
+[![Download Windows EXE](https://img.shields.io/badge/Download-Windows%20EXE%20(v2.0.0)-0078D7?style=for-the-badge&logo=windows&logoColor=white)](https://github.com/dularacharith/vdown/releases/latest/download/vdown.exe)
 [![Download APK](https://img.shields.io/badge/Download-Android%20APK%20(v2.0.0)-00C853?style=for-the-badge&logo=android&logoColor=white)](https://github.com/dularacharith/vdown/releases/latest/download/vdown.apk)
 [![License: MIT](https://img.shields.io/badge/License-MIT-06B6D4?style=for-the-badge)](LICENSE)
 
 A fast, versatile media downloader available as a **modern desktop GUI application** (Windows/Linux/macOS), a **powerful command-line tool** (Python), and a **native mobile app** (Android). Download videos, audio, streams, and direct media files from virtually any link on the web.
 
-> 🖥️ **Desktop GUI App**: Launch via `vdown-gui` (or `vdown-gui.bat` on Windows).
-> 📱 **Looking for the Android App?**
-> Download the prebuilt release APK directly: [**Download vdown.apk**](https://github.com/dularacharith/vdown/releases/latest/download/vdown.apk) or grab it from the repository root: [`vdown.apk`](vdown.apk).
+> 🖥️ **Windows Standalone App**: [**Download vdown.exe**](https://github.com/dularacharith/vdown/releases/latest/download/vdown.exe) (double-click to run immediately, no Python or installation required).
+> 📱 **Android Mobile App**: [**Download vdown.apk**](https://github.com/dularacharith/vdown/releases/latest/download/vdown.apk) or grab it from the repository root: [`vdown.apk`](vdown.apk).
 
 ## Features
 

@@ -1,4 +1,4 @@
-name: Release Mobile APK
+name: Build and Release VDown (APK & Windows EXE)
 
 on:
   push:
@@ -49,3 +49,63 @@ jobs:
           fi
 
           echo "Release ${TAG} published successfully with vdown.apk!"
+
+  build-windows-exe:
+    name: Build Standalone Windows Executable
+    runs-on: windows-latest
+    needs: publish-release
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Build Dependencies
+        shell: bash
+        run: |
+          python -m pip install --upgrade pip setuptools wheel
+          python -m pip install pyinstaller pycryptodomex
+          python -m pip install -e .
+
+      - name: Build Standalone Windows Executable with PyInstaller
+        shell: bash
+        run: |
+          pyinstaller --noconfirm --clean --onefile --windowed \
+            --name "vdown" \
+            --icon "assets/icon.ico" \
+            --collect-all "simple_downloader" \
+            --collect-all "yt_dlp" \
+            simple_downloader/gui/app.py
+
+      - name: Verify Executable Built
+        shell: bash
+        run: |
+          if [ ! -f "dist/vdown.exe" ]; then
+            echo "Error: dist/vdown.exe was not created!"
+            exit 1
+          fi
+          echo "Windows executable created successfully:"
+          ls -lh dist/vdown.exe
+
+      - name: Upload vdown.exe Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vdown-windows-exe
+          path: dist/vdown.exe
+
+      - name: Upload vdown.exe to GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          if [ "${GITHUB_REF_TYPE}" != "tag" ]; then
+            TAG="v2.0.0"
+          fi
+          echo "Target Release Tag: ${TAG}"
+          echo "Uploading dist/vdown.exe to release ${TAG}..."
+          gh release upload "${TAG}" dist/vdown.exe --clobber
+          echo "dist/vdown.exe successfully uploaded to release ${TAG}!"

@@ -21,7 +21,15 @@ def main():
     app.setApplicationDisplayName("VDown - Universal Media Downloader")
     app.setOrganizationName("VDown")
 
+    from PyQt6.QtGui import QIcon
+    icon_path = os.path.join(os.path.dirname(__file__), "icon.png")
+    if os.path.exists(icon_path):
+        app_icon = QIcon(icon_path)
+        app.setWindowIcon(app_icon)
+
     window = MainWindow()
+    if os.path.exists(icon_path):
+        window.setWindowIcon(QIcon(icon_path))
     window.show()
 
     return app.exec()
