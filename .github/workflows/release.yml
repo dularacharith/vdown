@@ -4,8 +4,6 @@ on:
   push:
     tags:
       - 'v*'
-    branches:
-      - main
   workflow_dispatch:
 
 permissions:
@@ -32,23 +30,23 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${GITHUB_REF_NAME}"
-          if [ "${GITHUB_REF_TYPE}" != "tag" ]; then
+          if [ -z "${TAG}" ] || [ "${GITHUB_REF_TYPE}" != "tag" ]; then
             TAG="v2.0.0"
           fi
           echo "Target Release Tag: ${TAG}"
 
-          if gh release view "${TAG}" >/dev/null 2>&1; then
-            echo "Release ${TAG} already exists. Updating notes and uploading vdown.apk..."
-            gh release edit "${TAG}" --title "VDown Release ${TAG}" --notes-file .github/release_notes.md
-            gh release upload "${TAG}" vdown.apk --clobber
-          else
-            echo "Creating new GitHub Release for ${TAG}..."
-            gh release create "${TAG}" vdown.apk \
-              --title "VDown Release ${TAG}" \
-              --notes-file .github/release_notes.md || gh release upload "${TAG}" vdown.apk --clobber
+          # Ensure the release exists or create it
+          if ! gh release view "${TAG}" >/dev/null 2>&1; then
+            echo "Creating release ${TAG}..."
+            gh release create "${TAG}" --title "VDown Release ${TAG}" --notes-file .github/release_notes.md
           fi
 
-          echo "Release ${TAG} published successfully with vdown.apk!"
+          echo "Updating release notes and uploading vdown.apk..."
+          gh release edit "${TAG}" --title "VDown Release ${TAG}" --notes-file .github/release_notes.md
+          gh release upload "${TAG}" vdown.apk --clobber
+
+          echo "Release ${TAG} current assets:"
+          gh release view "${TAG}"
 
   build-windows-exe:
     name: Build Standalone Windows Executable
@@ -102,10 +100,11 @@ jobs:
         shell: bash
         run: |
           TAG="${GITHUB_REF_NAME}"
-          if [ "${GITHUB_REF_TYPE}" != "tag" ]; then
+          if [ -z "${TAG}" ] || [ "${GITHUB_REF_TYPE}" != "tag" ]; then
             TAG="v2.0.0"
           fi
           echo "Target Release Tag: ${TAG}"
           echo "Uploading dist/vdown.exe to release ${TAG}..."
           gh release upload "${TAG}" dist/vdown.exe --clobber
-          echo "dist/vdown.exe successfully uploaded to release ${TAG}!"
+          echo "Release ${TAG} all assets:"
+          gh release view "${TAG}"
