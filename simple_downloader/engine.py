@@ -44,6 +44,26 @@ KNOWN_SOCIAL_DOMAINS = [
 ]
 
 
+def _find_ffmpeg_location() -> Optional[str]:
+    """Find ffmpeg binary location, checking system PATH, executable directory, and app directory."""
+    exe_dir = Path(sys.executable).parent
+    for name in ("ffmpeg.exe", "ffmpeg"):
+        if (exe_dir / name).is_file():
+            return str(exe_dir)
+
+    if hasattr(sys, "_MEIPASS"):
+        meipass_dir = Path(sys._MEIPASS)
+        for name in ("ffmpeg.exe", "ffmpeg"):
+            if (meipass_dir / name).is_file():
+                return str(meipass_dir)
+
+    sys_ffmpeg = shutil.which("ffmpeg")
+    if sys_ffmpeg:
+        return str(Path(sys_ffmpeg).parent)
+
+    return None
+
+
 def _build_base_ydl_opts(
     browser: Optional[str] = None,
     cookie_file: Optional[str] = None,
@@ -61,6 +81,11 @@ def _build_base_ydl_opts(
         opts["js_runtimes"] = {"node": {}}
     elif shutil.which("deno"):
         opts["js_runtimes"] = {"deno": {}}
+
+    # Configure ffmpeg location if detected
+    ffmpeg_loc = _find_ffmpeg_location()
+    if ffmpeg_loc:
+        opts["ffmpeg_location"] = ffmpeg_loc
 
     # Handle browser cookies (including auto-detection)
     target_browser = browser
@@ -526,6 +551,8 @@ class DownloadEngine:
         # Rich progress bar setup
         last_file_downloaded = None
         downloaded_files: List[str] = []
+        progress = None
+        task_tracker: Dict[str, Any] = {}
 
         def ydl_progress_hook(d: Dict[str, Any]):
             nonlocal last_file_downloaded
@@ -546,32 +573,33 @@ class DownloadEngine:
                 prefix = f"[{p_idx}/{p_count}] " if p_idx and p_count else ""
                 task_label = f"{prefix}{filename}"
 
-                if "task_id" not in task_tracker:
-                    task_tracker["task_id"] = progress.add_task(
-                        task_label,
-                        total=total,
-                        completed=downloaded,
-                        speed=speed,
-                        eta=eta,
-                    )
-                    task_tracker["current_fn"] = filename
-                elif task_tracker.get("current_fn") != filename:
-                    task_tracker["current_fn"] = filename
-                    progress.reset(
-                        task_tracker["task_id"],
-                        description=task_label,
-                        total=total,
-                        completed=downloaded,
-                    )
-                else:
-                    progress.update(
-                        task_tracker["task_id"],
-                        description=task_label,
-                        total=total,
-                        completed=downloaded,
-                        speed=speed,
-                        eta=eta,
-                    )
+                if progress is not None:
+                    if "task_id" not in task_tracker:
+                        task_tracker["task_id"] = progress.add_task(
+                            task_label,
+                            total=total,
+                            completed=downloaded,
+                            speed=speed,
+                            eta=eta,
+                        )
+                        task_tracker["current_fn"] = filename
+                    elif task_tracker.get("current_fn") != filename:
+                        task_tracker["current_fn"] = filename
+                        progress.reset(
+                            task_tracker["task_id"],
+                            description=task_label,
+                            total=total,
+                            completed=downloaded,
+                        )
+                    else:
+                        progress.update(
+                            task_tracker["task_id"],
+                            description=task_label,
+                            total=total,
+                            completed=downloaded,
+                            speed=speed,
+                            eta=eta,
+                        )
 
             if progress_callback:
                 try:
@@ -585,7 +613,7 @@ class DownloadEngine:
                     last_file_downloaded = fn
                     if fn not in downloaded_files:
                         downloaded_files.append(fn)
-                if "task_id" in task_tracker:
+                if progress is not None and "task_id" in task_tracker:
                     label = "Extracting Audio..." if audio_only else "Processing / Merging..."
                     progress.update(
                         task_tracker["task_id"],
@@ -614,7 +642,6 @@ class DownloadEngine:
                 from simple_downloader.progress import create_download_progress
 
                 progress = create_download_progress(show_progress=True)
-                task_tracker: Dict[str, Any] = {}
 
                 with progress:
                     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -632,6 +659,23 @@ class DownloadEngine:
                     common_dir = os.path.dirname(downloaded_files[0])
                     return common_dir if common_dir and os.path.isdir(common_dir) else last_file_downloaded
                 return downloaded_files[0]
+
+            if last_file_downloaded and os.path.exists(last_file_downloaded):
+                return last_file_downloaded
+            if downloaded_files:
+                for f in reversed(downloaded_files):
+                    if os.path.exists(f):
+                        return f
+
+            # Fallback: check for newest non-temporary file in dest_dir
+            try:
+                candidates = [p for p in dest_dir.iterdir() if p.is_file() and not p.name.endswith(".part") and not p.name.endswith(".ytdl")]
+                if candidates:
+                    newest = max(candidates, key=lambda p: p.stat().st_mtime)
+                    return str(newest)
+            except Exception:
+                pass
+
             return last_file_downloaded
 
         except Exception as e:

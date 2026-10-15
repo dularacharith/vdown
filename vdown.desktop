@@ -2,6 +2,7 @@
 Name=VDown
 Comment=Universal Video & Media Downloader
 Exec=vdown-gui
+Icon=vdown
 Terminal=false
 Type=Application
 Categories=AudioVideo;Network;

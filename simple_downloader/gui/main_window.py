@@ -40,6 +40,7 @@ from simple_downloader.browser_cookies import (
     get_best_browser,
     get_browser_cookie_summary,
 )
+from simple_downloader.gui.resources import get_app_icon, get_app_pixmap
 from simple_downloader.gui.styles import DARK_THEME_QSS
 from simple_downloader.gui.workers import InspectWorker, DownloadWorker
 from simple_downloader.utils import format_bytes, format_duration
@@ -94,6 +95,10 @@ class MainWindow(QMainWindow):
         self.setMinimumSize(820, 600)
         self.setStyleSheet(DARK_THEME_QSS)
 
+        app_icon = get_app_icon()
+        if not app_icon.isNull():
+            self.setWindowIcon(app_icon)
+
         self.current_inspect_worker: Optional[InspectWorker] = None
         self.current_download_worker: Optional[DownloadWorker] = None
         self.active_media_info: Optional[Dict[str, Any]] = None
@@ -136,16 +141,29 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(20, 14, 20, 14)
         layout.setSpacing(16)
 
-        # App Brand Title
+        # App Brand Title & Modern App Icon
+        brand_layout = QHBoxLayout()
+        brand_layout.setSpacing(12)
+        brand_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
+
+        pixmap = get_app_pixmap(44)
+        if pixmap:
+            icon_label = QLabel()
+            icon_label.setPixmap(pixmap)
+            icon_label.setFixedSize(44, 44)
+            brand_layout.addWidget(icon_label)
+
         title_box = QVBoxLayout()
         title_box.setSpacing(2)
-        title = QLabel("🎬 VDown")
+        title = QLabel("VDown")
         title.setObjectName("AppTitle")
         subtitle = QLabel("Universal Video & Audio Downloader")
         subtitle.setObjectName("SubText")
         title_box.addWidget(title)
         title_box.addWidget(subtitle)
-        layout.addLayout(title_box)
+        brand_layout.addLayout(title_box)
+
+        layout.addLayout(brand_layout)
 
         # Version Badge
         ver_badge = QLabel(f"v{__version__} Desktop")

@@ -34,11 +34,19 @@ mkdir -p "$BIN_DIR"
 ln -sf "$REPO_DIR/vdown" "$BIN_DIR/vdown"
 ln -sf "$REPO_DIR/vdown-gui" "$BIN_DIR/vdown-gui"
 
-# Install desktop shortcut
+# Install desktop shortcut and icon
+mkdir -p "$HOME/.local/share/icons/hicolor/512x512/apps"
+mkdir -p "$HOME/.local/share/pixmaps"
+if [ -f "$REPO_DIR/assets/icon.png" ]; then
+    cp "$REPO_DIR/assets/icon.png" "$HOME/.local/share/icons/hicolor/512x512/apps/vdown.png"
+    cp "$REPO_DIR/assets/icon.png" "$HOME/.local/share/pixmaps/vdown.png"
+fi
+
 if [ -f "$REPO_DIR/vdown.desktop" ]; then
     mkdir -p "$DESKTOP_DIR"
     cp "$REPO_DIR/vdown.desktop" "$DESKTOP_DIR/vdown.desktop"
     sed -i "s|Exec=vdown-gui|Exec=$BIN_DIR/vdown-gui|g" "$DESKTOP_DIR/vdown.desktop"
+    sed -i "s|Icon=vdown|Icon=$HOME/.local/share/pixmaps/vdown.png|g" "$DESKTOP_DIR/vdown.desktop"
 fi
 
 echo ""

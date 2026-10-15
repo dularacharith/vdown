@@ -6,10 +6,20 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication
 
 from simple_downloader.gui.main_window import MainWindow
+from simple_downloader.gui.resources import get_app_icon
 
 
 def main():
     """Main desktop GUI entry point."""
+    # Ensure Windows taskbar groups and shows the custom app icon
+    if sys.platform == "win32":
+        try:
+            import ctypes
+            myappid = "dularacharith.vdown.desktop.2.0.0"
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(myappid)
+        except Exception:
+            pass
+
     # Enable High DPI scaling
     if hasattr(Qt, "HighDpiScaleFactorRoundingPolicy"):
         QApplication.setHighDpiScaleFactorRoundingPolicy(
@@ -21,15 +31,13 @@ def main():
     app.setApplicationDisplayName("VDown - Universal Media Downloader")
     app.setOrganizationName("VDown")
 
-    from PyQt6.QtGui import QIcon
-    icon_path = os.path.join(os.path.dirname(__file__), "icon.png")
-    if os.path.exists(icon_path):
-        app_icon = QIcon(icon_path)
+    app_icon = get_app_icon()
+    if not app_icon.isNull():
         app.setWindowIcon(app_icon)
 
     window = MainWindow()
-    if os.path.exists(icon_path):
-        window.setWindowIcon(QIcon(icon_path))
+    if not app_icon.isNull():
+        window.setWindowIcon(app_icon)
     window.show()
 
     return app.exec()
