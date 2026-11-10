@@ -23,12 +23,25 @@ from simple_downloader.direct_downloader import DirectDownloader
 from simple_downloader.facebook import FacebookDownloader, is_facebook_url
 from simple_downloader.scraper import WebpageVideoScraper
 from simple_downloader.tiktok import TikTokDownloader, is_tiktok_url
+from simple_downloader.youtube import (
+    is_youtube_url,
+    is_youtube_shorts_url,
+    normalize_youtube_url,
+    to_watch_url,
+    get_shorts_format_selector,
+    YouTubeDownloader,
+)
 from simple_downloader.utils import (
     is_direct_media_url,
     format_bytes,
     format_duration,
     sanitize_filename,
 )
+
+# Ensure standard macOS and user paths are in PATH
+for _extra_p in ("/opt/homebrew/bin", "/usr/local/bin", "/opt/local/bin", str(Path.home() / ".local/bin")):
+    if os.path.isdir(_extra_p) and _extra_p not in os.environ.get("PATH", "").split(os.pathsep):
+        os.environ["PATH"] = f"{_extra_p}{os.pathsep}{os.environ.get('PATH', '')}"
 
 console = Console()
 
@@ -60,6 +73,17 @@ def _find_ffmpeg_location() -> Optional[str]:
     sys_ffmpeg = shutil.which("ffmpeg")
     if sys_ffmpeg:
         return str(Path(sys_ffmpeg).parent)
+
+    # Common macOS / Homebrew / user locations if PATH doesn't include them
+    common_paths = [
+        Path("/opt/homebrew/bin"),
+        Path("/usr/local/bin"),
+        Path("/opt/local/bin"),
+        Path.home() / ".local/bin",
+    ]
+    for p in common_paths:
+        if (p / "ffmpeg").is_file():
+            return str(p)
 
     return None
 
@@ -149,6 +173,24 @@ class DownloadEngine:
             except Exception:
                 pass
 
+        # Specialized YouTube handler (Shorts, vertical videos, and client fallback)
+        if is_youtube_url(url):
+            try:
+                yt = YouTubeDownloader()
+                yt_info = yt.get_info(
+                    url,
+                    browser=browser,
+                    cookie_file=cookie_file,
+                    proxy=proxy,
+                    user_agent=user_agent,
+                    referer=referer,
+                )
+                if yt_info:
+                    return yt_info
+            except Exception:
+                pass
+
+        target_info_url = normalize_youtube_url(url) if is_youtube_url(url) else url
         ydl_opts = _build_base_ydl_opts(
             browser=browser,
             cookie_file=cookie_file,
@@ -156,6 +198,10 @@ class DownloadEngine:
             user_agent=user_agent,
             referer=referer,
         )
+        if is_youtube_url(url):
+            ydl_opts.setdefault("extractor_args", {})["youtube"] = {
+                "player_client": ["android", "web", "mweb", "ios"],
+            }
         ydl_opts.update({
             "quiet": True,
             "no_warnings": True,
@@ -165,8 +211,18 @@ class DownloadEngine:
 
         try:
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                info = ydl.extract_info(url, download=False)
+                info = ydl.extract_info(target_info_url, download=False)
                 if info:
+                    if is_youtube_shorts_url(url):
+                        info["is_youtube_shorts"] = True
+                        info["is_short"] = True
+                    elif is_youtube_url(url):
+                        w = info.get("width") or 0
+                        h = info.get("height") or 0
+                        dur = info.get("duration") or 0
+                        if h > w and 0 < dur <= 180:
+                            info["is_youtube_shorts"] = True
+                            info["is_short"] = True
                     entries = info.get("entries")
                     if entries is not None:
                         if not isinstance(entries, list):
@@ -438,7 +494,7 @@ class DownloadEngine:
                 )
 
         # 2. Build yt-dlp options
-        target_dl_url = (info.get("normalized_url") if info else None) or url
+        target_dl_url = (info.get("normalized_url") if info else None) or (normalize_youtube_url(url) if is_youtube_url(url) else url)
         dest_dir = Path(output_dir or "downloads").expanduser().resolve()
         dest_dir.mkdir(parents=True, exist_ok=True)
 
@@ -474,6 +530,10 @@ class DownloadEngine:
             user_agent=user_agent,
             referer=referer,
         )
+        if is_youtube_url(url) or (info and is_youtube_url(info.get("webpage_url", ""))):
+            ydl_opts.setdefault("extractor_args", {})["youtube"] = {
+                "player_client": ["android", "web", "mweb", "ios"],
+            }
         ydl_opts.update({
             "outtmpl": out_template,
             "quiet": True,
@@ -501,6 +561,9 @@ class DownloadEngine:
             if audio_format.lower() not in ("flac", "wav"):
                 pp["preferredquality"] = preferred_q
             ydl_opts["postprocessors"] = [pp]
+        elif (info and info.get("is_youtube_shorts")) or is_youtube_shorts_url(url):
+            # Format selection optimized for vertical YouTube Shorts
+            ydl_opts["format"] = get_shorts_format_selector(quality)
         else:
             # Video quality logic
             quality_map = {

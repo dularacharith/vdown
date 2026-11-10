@@ -67,6 +67,11 @@ def display_media_info(info: Dict[str, Any], console: Console) -> None:
             if info.get("is_photo"):
                 details.append("Post Type: ", style="bold magenta")
                 details.append(f"Photo Carousel / Slideshow ({len(info.get('images', []))} slides)\n")
+        elif info.get("is_youtube_shorts"):
+            details.append("Platform: ", style="bold red")
+            details.append("⚡ YouTube Shorts\n")
+            details.append("Format: ", style="bold magenta")
+            details.append("Vertical Video (9:16)\n")
 
     console.print(
         Panel(

@@ -625,6 +625,8 @@ class MainWindow(QMainWindow):
         chip_text = "Universal Link"
         if not url:
             chip_text = "Universal Link"
+        elif "youtube.com/shorts/" in url:
+            chip_text = "⚡ YouTube Shorts"
         elif "youtube.com" in url or "youtu.be" in url:
             chip_text = "📺 YouTube"
         elif "tiktok.com" in url:

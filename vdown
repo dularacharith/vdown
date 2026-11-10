@@ -1,12 +1,26 @@
 #!/usr/bin/env bash
 # Launcher script for simple-downloader (vdown)
 
-# Resolve symlink to the real script location
-REAL_SCRIPT="$(readlink -f "${BASH_SOURCE[0]}")"
-SCRIPT_DIR="$(cd "$(dirname "$REAL_SCRIPT")" && pwd)"
+# Portable symlink resolution for macOS and Linux
+TARGET="${BASH_SOURCE[0]}"
+while [ -L "$TARGET" ]; do
+    DIR="$(cd -P "$(dirname "$TARGET")" && pwd)"
+    TARGET="$(readlink "$TARGET")"
+    [[ $TARGET != /* ]] && TARGET="$DIR/$TARGET"
+done
+SCRIPT_DIR="$(cd -P "$(dirname "$TARGET")" && pwd)"
+
+# Ensure Homebrew and standard paths are in PATH on macOS
+for extra_path in "/opt/homebrew/bin" "/usr/local/bin" "/opt/local/bin" "$HOME/.local/bin"; do
+    if [ -d "$extra_path" ] && [[ ":$PATH:" != *":$extra_path:"* ]]; then
+        export PATH="$extra_path:$PATH"
+    fi
+done
 
 if [ -f "$SCRIPT_DIR/.venv/bin/python" ]; then
     PYTHON_BIN="$SCRIPT_DIR/.venv/bin/python"
+elif [ -f "$SCRIPT_DIR/.venv/bin/python3" ]; then
+    PYTHON_BIN="$SCRIPT_DIR/.venv/bin/python3"
 elif command -v python3 >/dev/null 2>&1; then
     PYTHON_BIN="python3"
 else

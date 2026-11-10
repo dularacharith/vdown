@@ -1,5 +1,6 @@
 """Unit tests for browser cookie discovery, auto-retry, and direct download protection."""
 
+import sys
 import unittest
 from unittest.mock import patch, MagicMock
 
@@ -23,8 +24,9 @@ class TestBrowserCookies(unittest.TestCase):
         self.assertIn("browser", first)
         self.assertIn("available", first)
         self.assertIn("cookies_count", first)
-        # Verify Firefox is priority 1
-        self.assertEqual(first["browser"], "firefox")
+        # Verify platform priority browser (Safari on macOS, Firefox on others)
+        expected_first = "safari" if sys.platform == "darwin" else "firefox"
+        self.assertEqual(first["browser"], expected_first)
 
     @patch("simple_downloader.browser_cookies.detect_available_browsers")
     def test_get_best_browser_selects_firefox(self, mock_detect):

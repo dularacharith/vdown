@@ -12,9 +12,10 @@ A fast, versatile media downloader available as a **modern desktop GUI applicati
 
 ## Features
 
-- **Desktop GUI Application**: Full-featured PyQt6 desktop interface with Dark/AMOLED theme, format selectors, live download speed, ETA countdown, and library history.
-- **Universal Link Support**: Downloads from YouTube, Facebook, Instagram, TikTok (without watermark), Twitter/X, Vimeo, Reddit, Twitch, and 1800+ other platforms.
-- **Firefox & Browser Cookie Auto-Detection**: Automatically detects active session cookies from **Mozilla Firefox**, **Google Chrome**, **Brave**, and **Microsoft Edge** to seamlessly bypass bot checks and download login-protected/age-gated media.
+- **Desktop GUI Application**: Full-featured PyQt6 desktop interface with Dark/AMOLED theme, format selectors, live download speed, ETA countdown, and library history (Native macOS `.app` bundle supported).
+- **YouTube Shorts**: Dedicated support for **YouTube Shorts** (vertical 9:16 videos) with automatic resolution handling (1080p vertical, 720p, etc.) without downscaling or format distortion.
+- **Universal Link Support**: Downloads from YouTube, YouTube Shorts, Facebook, Instagram, TikTok (without watermark), Twitter/X, Vimeo, Reddit, Twitch, and 1800+ other platforms.
+- **Safari, Firefox & Browser Cookie Auto-Detection**: Automatically detects active session cookies from **Apple Safari** (macOS), **Mozilla Firefox**, **Google Chrome**, **Brave**, and **Microsoft Edge** to seamlessly bypass bot checks and download login-protected/age-gated media.
 - **YouTube Playlists**: Downloads complete playlists or specific track ranges into organized folders with track numbers (`01 - Title.mp4`).
 - **Studio-Quality Audio Extraction**: Extract audio in lossless **FLAC** (bit-perfect studio quality), **320 kbps MP3** (extreme high quality), **M4A/AAC**, **WAV** (lossless uncompressed PCM), and **OPUS**.
 - **Interactive Audio Menu**: Select formats and bitrates (320k, 256k, 192k, 128k, VBR, custom) directly from a guided wizard.
@@ -27,10 +28,13 @@ A fast, versatile media downloader available as a **modern desktop GUI applicati
 
 ## Prerequisites
 
-- **Python**: 3.10 or higher
+- **Python**: 3.9 or higher (macOS system Python 3.9+ supported out of the box)
 - **FFmpeg**: Required for audio/video merging and format conversion
 
 ```bash
+# macOS (via Homebrew)
+brew install ffmpeg
+
 # Windows (via winget)
 winget install Python.Python.3.12
 winget install Gyan.FFmpeg
@@ -46,13 +50,14 @@ sudo apt install ffmpeg python3 python3-venv
 
 ## Installation
 
-### Linux / macOS
+### macOS / Linux
 ```bash
 git clone https://github.com/dularacharith/vdown.git
 cd vdown
 ./install.sh
 ```
-This sets up a virtual environment and creates symlinks for `vdown` (CLI) and `vdown-gui` (Desktop GUI) in `~/.local/bin/`.
+- On **macOS**: Automatically configures the environment, symlinks `vdown` and `vdown-gui`, and generates a native macOS application at `~/Applications/VDown.app` with Retina icon support.
+- On **Linux**: Sets up virtual environment and desktop shortcuts.
 
 ### Windows (CMD or PowerShell)
 ```cmd
@@ -106,7 +111,19 @@ vdown "https://www.youtube.com/playlist?list=PL..." --playlist-items 1-10
 vdown "https://www.youtube.com/watch?v=...&list=..." --no-playlist
 ```
 
-### 3. Extract Audio (Lossless FLAC & 320 kbps MP3)
+### 3. Download YouTube Shorts (Vertical 9:16 Video)
+```bash
+# Download YouTube Short in best available vertical quality
+vdown "https://www.youtube.com/shorts/..."
+
+# Download YouTube Short in full 1080p vertical resolution (1080x1920)
+vdown "https://www.youtube.com/shorts/..." -q 1080p
+
+# Extract soundtrack from YouTube Short as 320 kbps MP3 or lossless FLAC
+vdown "https://www.youtube.com/shorts/..." -a --audio-format mp3
+```
+
+### 4. Extract Audio (Lossless FLAC & 320 kbps MP3)
 ```bash
 # Extract 320 kbps MP3 (default audio bitrate is 320 kbps)
 vdown "https://www.youtube.com/watch?v=..." -a

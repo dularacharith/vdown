@@ -1,5 +1,6 @@
 """Browser cookie detection and session management for simple-downloader."""
 
+import concurrent.futures
 import logging
 import shutil
 import sys
@@ -7,18 +8,80 @@ from typing import Dict, List, Optional, Any
 
 logger = logging.getLogger(__name__)
 
-# Order of browsers to prioritize (Firefox is checked first)
-PRIORITY_BROWSERS = [
-    "firefox",
-    "chrome",
-    "brave",
-    "edge",
-    "chromium",
-    "opera",
-    "vivaldi",
-]
+# Order of browsers to prioritize (Safari is first on macOS, Firefox on others)
+if sys.platform == "darwin":
+    PRIORITY_BROWSERS = [
+        "safari",
+        "chrome",
+        "brave",
+        "firefox",
+        "edge",
+        "chromium",
+        "opera",
+        "vivaldi",
+    ]
+else:
+    PRIORITY_BROWSERS = [
+        "firefox",
+        "chrome",
+        "brave",
+        "edge",
+        "chromium",
+        "opera",
+        "vivaldi",
+    ]
 
 _CACHED_RESULTS: Optional[List[Dict[str, Any]]] = None
+
+
+CHROMIUM_KEYCHAINS = {
+    "chrome": ("Chrome Safe Storage", "Chrome"),
+    "brave": ("Brave Safe Storage", "Brave"),
+    "edge": ("Microsoft Edge Safe Storage", "Microsoft Edge"),
+    "chromium": ("Chromium Safe Storage", "Chromium"),
+    "opera": ("Opera Safe Storage", "Opera"),
+    "vivaldi": ("Vivaldi Safe Storage", "Vivaldi"),
+}
+
+
+def _can_access_mac_keychain(service: str, account: str, timeout: float = 0.3) -> bool:
+    """Check if macOS Keychain item can be read without blocking on an interactive prompt."""
+    import subprocess
+    try:
+        proc = subprocess.run(
+            ["security", "find-generic-password", "-w", "-a", account, "-s", service],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=timeout,
+        )
+        return proc.returncode == 0
+    except subprocess.TimeoutExpired:
+        try:
+            subprocess.run(["killall", "-9", "security"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, check=False)
+        except Exception:
+            pass
+        return False
+    except Exception:
+        return False
+
+
+def _extract_browser_cookies_safe(browser: str, timeout: float = 2.0) -> Any:
+    """Safely extract browser cookies with a timeout and macOS Keychain check."""
+    import yt_dlp.cookies
+
+    # On macOS, avoid hanging on Keychain prompts for Chromium-based browsers
+    if sys.platform == "darwin" and browser in CHROMIUM_KEYCHAINS:
+        service, account = CHROMIUM_KEYCHAINS[browser]
+        if not _can_access_mac_keychain(service, account, timeout=0.3):
+            logger.debug(f"Skipping {browser}: macOS Keychain authorization requires prompt.")
+            return None
+
+    try:
+        return yt_dlp.cookies.extract_cookies_from_browser(browser)
+    except Exception as e:
+        logger.debug(f"Cookie extraction for {browser} failed: {e}")
+        return None
 
 
 def detect_available_browsers(force_refresh: bool = False) -> List[Dict[str, Any]]:
@@ -71,7 +134,7 @@ def detect_available_browsers(force_refresh: bool = False) -> List[Dict[str, Any
         }
 
         try:
-            cj = yt_dlp.cookies.extract_cookies_from_browser(browser)
+            cj = _extract_browser_cookies_safe(browser, timeout=2.0)
             if cj is not None:
                 count = len(cj)
                 browser_info["available"] = count > 0

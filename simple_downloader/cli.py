@@ -238,20 +238,22 @@ def _run_interactive_mode_impl(engine: DownloadEngine, initial_url: Optional[str
         best_b = get_best_browser()
         if best_b:
             summary = get_browser_cookie_summary()
+            browser_choices = ["auto", "safari", "firefox", "chrome", "brave", "edge", "chromium", "opera", "vivaldi"] if sys.platform == "darwin" else ["auto", "firefox", "chrome", "brave", "edge", "chromium", "opera", "vivaldi", "safari"]
             if Confirm.ask(f"Use session cookies from detected browser ([bold cyan]{summary}[/bold cyan])?", default=True):
                 browser = "auto"
             elif Confirm.ask("Select a specific browser for cookies?", default=False):
                 browser = Prompt.ask(
                     "Select browser",
-                    choices=["auto", "firefox", "chrome", "brave", "edge", "chromium", "opera", "vivaldi"],
+                    choices=browser_choices,
                     default=best_b,
                 )
         else:
+            browser_choices = ["auto", "safari", "firefox", "chrome", "brave", "edge", "chromium", "opera", "vivaldi"] if sys.platform == "darwin" else ["auto", "firefox", "chrome", "brave", "edge", "chromium", "opera", "vivaldi", "safari"]
             if Confirm.ask("Use cookies from an installed browser?", default=False):
                 browser = Prompt.ask(
                     "Select browser",
-                    choices=["auto", "firefox", "chrome", "brave", "edge", "chromium", "opera", "vivaldi"],
-                    default="firefox",
+                    choices=browser_choices,
+                    default="safari" if sys.platform == "darwin" else "firefox",
                 )
 
     with console.status("[cyan]Analyzing media link...[/cyan]"):
@@ -262,6 +264,9 @@ def _run_interactive_mode_impl(engine: DownloadEngine, initial_url: Optional[str
             return 1
 
     display_media_info(info, console)
+
+    if info.get("is_youtube_shorts"):
+        console.print("\n[bold red]⚡ YouTube Short Detected[/bold red] [dim](Optimized 9:16 vertical video download)[/dim]")
 
     # Detect playlist presence in link
     is_playlist = info.get("is_playlist", False) or ("list=" in url.lower())
@@ -605,6 +610,8 @@ def main(argv: Optional[List[str]] = None) -> int:
                         referer=args.referer,
                     )
                 display_media_info(info, console)
+                if info.get("is_youtube_shorts"):
+                    console.print("\n[bold red]⚡ YouTube Short Detected[/bold red] [dim](Optimized 9:16 vertical video download)[/dim]")
                 formats = engine.list_formats(info)
                 display_formats_table(formats, console)
                 return 0
