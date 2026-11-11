@@ -58,9 +58,9 @@ if [ "$OS_TYPE" = "Darwin" ]; then
     # Check for ffmpeg
     if ! command -v ffmpeg >/dev/null 2>&1 && [ ! -f "/usr/local/bin/ffmpeg" ] && [ ! -f "/opt/homebrew/bin/ffmpeg" ]; then
         echo ""
-        echo "ℹ Note: FFmpeg is recommended on macOS for high-quality audio extraction and video format merging."
+        echo "ℹ Note: FFmpeg standalone binary is automatically provided via imageio-ffmpeg for high-quality format merging."
         if command -v brew >/dev/null 2>&1; then
-            echo "  To install FFmpeg via Homebrew, run: brew install ffmpeg"
+            echo "  Optionally, to install system FFmpeg via Homebrew: brew install ffmpeg"
         fi
         echo ""
     fi

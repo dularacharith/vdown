@@ -9,8 +9,9 @@ from pathlib import Path
 from typing import Optional, Dict, Any, List
 
 from PyQt6.QtCore import Qt, QTimer, QUrl
-from PyQt6.QtGui import QIcon, QDesktopServices, QClipboard, QAction
+from PyQt6.QtGui import QIcon, QDesktopServices, QAction
 from PyQt6.QtWidgets import (
+    QApplication,
     QMainWindow,
     QWidget,
     QVBoxLayout,
@@ -647,11 +648,12 @@ class MainWindow(QMainWindow):
         self.platform_chip.setText(chip_text)
 
     def _paste_clipboard(self):
-        clipboard = QClipboard()
-        text = clipboard.text().strip()
-        if text:
-            self.url_input.setText(text)
-            self._start_inspect()
+        clipboard = QApplication.clipboard()
+        if clipboard:
+            text = clipboard.text().strip()
+            if text:
+                self.url_input.setText(text)
+                self._start_inspect()
 
     def _browse_destination_dir(self):
         curr = self.txt_dest_dir.text()

@@ -164,11 +164,60 @@ class TestYouTubeShorts(unittest.TestCase):
         # Check format selector includes vertical width rule
         fmt_string = captured_opts.get("format", "")
         self.assertIn("width<=1080", fmt_string)
+        self.assertIn("height<=1080", fmt_string)
 
         # Check YouTube player_client extractor_args are set
         ext_args = captured_opts.get("extractor_args", {})
         self.assertIn("youtube", ext_args)
         self.assertIn("player_client", ext_args["youtube"])
+        self.assertIn("android_vr", ext_args["youtube"]["player_client"])
+
+    def test_ffmpeg_detection_and_base_opts(self):
+        from simple_downloader.engine import _find_ffmpeg_location, _build_base_ydl_opts
+        loc = _find_ffmpeg_location()
+        self.assertIsNotNone(loc)
+        base_opts = _build_base_ydl_opts()
+        self.assertIn("format_sort", base_opts)
+        self.assertIn("vcodec:h264", base_opts["format_sort"])
+        self.assertIn("acodec:m4a", base_opts["format_sort"])
+
+    def test_ensure_mp4_compatibility_non_mp4(self):
+        from simple_downloader.engine import _ensure_mp4_compatibility
+        self.assertEqual(_ensure_mp4_compatibility("video.mkv"), "video.mkv")
+        self.assertEqual(_ensure_mp4_compatibility("audio.mp3"), "audio.mp3")
+        self.assertEqual(_ensure_mp4_compatibility(""), "")
+
+    def test_all_shorts_quality_selectors(self):
+        selectors = {
+            "4k": ["height<=2160", "width<=2160"],
+            "1440p": ["height<=1440", "width<=1440"],
+            "1080p": ["height<=1080", "width<=1080"],
+            "720p": ["height<=720", "width<=720"],
+            "480p": ["height<=480", "width<=480"],
+            "360p": ["height<=360", "width<=360"],
+        }
+        for q, tokens in selectors.items():
+            sel = get_shorts_format_selector(q)
+            for tok in tokens:
+                self.assertIn(tok, sel, f"Selector for {q} missing {tok}")
+
+        self.assertEqual(get_shorts_format_selector("best"), "bestvideo+bestaudio/best")
+        self.assertEqual(get_shorts_format_selector("worst"), "worstvideo+worstaudio/worst")
+
+
+    def test_gui_paste_clipboard_no_crash(self):
+        import os
+        os.environ["QT_QPA_PLATFORM"] = "offscreen"
+        from PyQt6.QtWidgets import QApplication
+        from simple_downloader.gui.main_window import MainWindow
+
+        app = QApplication.instance() or QApplication([])
+        win = MainWindow()
+        cb = QApplication.clipboard()
+        test_url = "https://youtube.com/shorts/iMKS0DCrIlY"
+        cb.setText(test_url)
+        win._paste_clipboard()
+        self.assertEqual(win.url_input.text(), test_url)
 
 
 if __name__ == "__main__":

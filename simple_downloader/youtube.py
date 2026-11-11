@@ -100,28 +100,28 @@ def to_shorts_url(url_or_id: str) -> str:
 def get_shorts_format_selector(quality: Optional[str] = "best") -> str:
     """Construct format selector optimized for YouTube Shorts (vertical 9:16 aspect ratio).
 
-    For YouTube Shorts (vertical videos):
-      - 1080p is 1080x1920 (width 1080, height 1920)
-      - 720p is 720x1280 (width 720, height 1280)
-      - 480p is 480x854 (width 480, height 854)
-      - 360p is 360x640 (width 360, height 640)
+    For YouTube Shorts:
+      - 1080p is 1080x1920 (width 1080, height 1920) or reported as 1920x1080 depending on the client.
+      - 720p is 720x1280 (width 720, height 1280) or 1280x720.
+      - 480p is 480x854 or 854x480.
+      - 360p is 360x640 or 640x360.
 
-    Using width<=1080 first guarantees 1080p vertical videos are selected properly,
-    while falling back to height<=1080 if given a landscape video.
+    Checking both height and width boundaries ensures the intended resolution is selected
+    whether formats report vertical dimensions or transposed/landscape stream containers.
     """
     q = (quality or "best").lower()
     if q in ("4k", "2160p"):
-        return "bestvideo[width<=2160]+bestaudio/bestvideo[height<=2160]+bestaudio/best[width<=2160]/best"
-    elif q == "1440p":
-        return "bestvideo[width<=1440]+bestaudio/bestvideo[height<=1440]+bestaudio/best[width<=1440]/best"
+        return "bestvideo[height<=2160]+bestaudio/bestvideo[width<=2160]+bestaudio/best[height<=2160]/best[width<=2160]/best"
+    elif q in ("1440p", "2k"):
+        return "bestvideo[height<=1440]+bestaudio/bestvideo[width<=1440]+bestaudio/best[height<=1440]/best[width<=1440]/best"
     elif q == "1080p":
-        return "bestvideo[width<=1080]+bestaudio/bestvideo[height<=1080]+bestaudio/best[width<=1080]/best"
+        return "bestvideo[height<=1080]+bestaudio/bestvideo[width<=1080]+bestaudio/best[height<=1080]/best[width<=1080]/best"
     elif q == "720p":
-        return "bestvideo[width<=720]+bestaudio/bestvideo[height<=720]+bestaudio/best[width<=720]/best"
+        return "bestvideo[height<=720]+bestaudio/bestvideo[width<=720]+bestaudio/best[height<=720]/best[width<=720]/best"
     elif q == "480p":
-        return "bestvideo[width<=480]+bestaudio/bestvideo[height<=480]+bestaudio/best[width<=480]/best"
+        return "bestvideo[height<=480]+bestaudio/bestvideo[width<=480]+bestaudio/best[height<=480]/best[width<=480]/best"
     elif q == "360p":
-        return "bestvideo[width<=360]+bestaudio/bestvideo[height<=360]+bestaudio/best[width<=360]/best"
+        return "bestvideo[height<=360]+bestaudio/bestvideo[width<=360]+bestaudio/best[height<=360]/best[width<=360]/best"
     elif q == "worst":
         return "worstvideo+worstaudio/worst"
     else:
@@ -163,7 +163,7 @@ class YouTubeDownloader:
             "skip_download": True,
             "extractor_args": {
                 "youtube": {
-                    "player_client": ["android", "web", "mweb", "ios"],
+                    "player_client": ["android_vr", "web"],
                 }
             },
         })

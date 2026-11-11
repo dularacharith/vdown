@@ -58,21 +58,53 @@ KNOWN_SOCIAL_DOMAINS = [
 
 
 def _find_ffmpeg_location() -> Optional[str]:
-    """Find ffmpeg binary location, checking system PATH, executable directory, and app directory."""
+    """Find ffmpeg binary location, checking imageio-ffmpeg, system PATH, executable directory, and app directory."""
+    # 1. Check imageio-ffmpeg bundled standalone binary
+    try:
+        import imageio_ffmpeg
+        ffmpeg_bin = imageio_ffmpeg.get_ffmpeg_exe()
+        if ffmpeg_bin and Path(ffmpeg_bin).is_file():
+            p = Path(ffmpeg_bin).parent
+            link_name = "ffmpeg.exe" if sys.platform.startswith("win") else "ffmpeg"
+            link_path = p / link_name
+            if not link_path.exists():
+                try:
+                    os.symlink(ffmpeg_bin, link_path)
+                except Exception:
+                    try:
+                        shutil.copy2(ffmpeg_bin, link_path)
+                    except Exception:
+                        pass
+            loc_str = str(p)
+            if loc_str not in os.environ.get("PATH", ""):
+                os.environ["PATH"] = f"{loc_str}{os.pathsep}{os.environ.get('PATH', '')}"
+            return loc_str
+    except Exception:
+        pass
+
     exe_dir = Path(sys.executable).parent
     for name in ("ffmpeg.exe", "ffmpeg"):
         if (exe_dir / name).is_file():
-            return str(exe_dir)
+            loc_str = str(exe_dir)
+            if loc_str not in os.environ.get("PATH", ""):
+                os.environ["PATH"] = f"{loc_str}{os.pathsep}{os.environ.get('PATH', '')}"
+            return loc_str
 
     if hasattr(sys, "_MEIPASS"):
         meipass_dir = Path(sys._MEIPASS)
         for name in ("ffmpeg.exe", "ffmpeg"):
             if (meipass_dir / name).is_file():
-                return str(meipass_dir)
+                loc_str = str(meipass_dir)
+                if loc_str not in os.environ.get("PATH", ""):
+                    os.environ["PATH"] = f"{loc_str}{os.pathsep}{os.environ.get('PATH', '')}"
+                return loc_str
 
     sys_ffmpeg = shutil.which("ffmpeg")
     if sys_ffmpeg:
-        return str(Path(sys_ffmpeg).parent)
+        loc_str = str(Path(sys_ffmpeg).parent)
+        if loc_str not in os.environ.get("PATH", ""):
+            os.environ["PATH"] = f"{loc_str}{os.pathsep}{os.environ.get('PATH', '')}"
+        return loc_str
 
     # Common macOS / Homebrew / user locations if PATH doesn't include them
     common_paths = [
@@ -83,9 +115,72 @@ def _find_ffmpeg_location() -> Optional[str]:
     ]
     for p in common_paths:
         if (p / "ffmpeg").is_file():
-            return str(p)
+            loc_str = str(p)
+            if loc_str not in os.environ.get("PATH", ""):
+                os.environ["PATH"] = f"{loc_str}{os.pathsep}{os.environ.get('PATH', '')}"
+            return loc_str
 
     return None
+
+
+def _ensure_mp4_compatibility(file_path: str) -> str:
+    """Ensure MP4 video and audio streams are compatible with standard native media players (QuickTime, Windows Media Player, iOS, etc.).
+
+    QuickTime and native OS media players require H.264/HEVC video and AAC audio inside MP4 containers.
+    If the file contains non-standard codecs like VP9/AV1 or Opus audio, this transcodes
+    the incompatible tracks to H.264/AAC with faststart flags.
+    """
+    if not file_path or not os.path.isfile(file_path):
+        return file_path
+    if not file_path.lower().endswith(".mp4"):
+        return file_path
+
+    _find_ffmpeg_location()
+    ffmpeg_bin = shutil.which("ffmpeg")
+    if not ffmpeg_bin:
+        return file_path
+
+    try:
+        proc = subprocess.run(
+            ["ffmpeg", "-i", file_path],
+            stderr=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            text=True,
+            timeout=10,
+        )
+        err = proc.stderr
+        import re
+        video_codecs = [c.lower() for c in re.findall(r"Stream #\d+:\d+.*?: Video: ([a-zA-Z0-9_-]+)", err)]
+        audio_codecs = [c.lower() for c in re.findall(r"Stream #\d+:\d+.*?: Audio: ([a-zA-Z0-9_-]+)", err)]
+
+        needs_video = any(c in ("vp9", "vp8", "av1", "av01") for c in video_codecs)
+        needs_audio = any(c in ("opus", "vorbis", "flac") for c in audio_codecs)
+
+        if not needs_video and not needs_audio:
+            return file_path
+
+        tmp_out = f"{file_path}.compat.mp4"
+        cmd = ["ffmpeg", "-y", "-i", file_path]
+        if needs_video:
+            cmd.extend(["-c:v", "libx264", "-preset", "veryfast", "-crf", "18", "-pix_fmt", "yuv420p"])
+        else:
+            cmd.extend(["-c:v", "copy"])
+
+        if needs_audio:
+            cmd.extend(["-c:a", "aac", "-b:a", "192k"])
+        else:
+            cmd.extend(["-c:a", "copy"])
+
+        cmd.extend(["-movflags", "+faststart", tmp_out])
+        sub_proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        if sub_proc.returncode == 0 and os.path.isfile(tmp_out) and os.path.getsize(tmp_out) > 0:
+            shutil.move(tmp_out, file_path)
+        elif os.path.isfile(tmp_out):
+            os.remove(tmp_out)
+    except Exception:
+        pass
+
+    return file_path
 
 
 def _build_base_ydl_opts(
@@ -98,13 +193,19 @@ def _build_base_ydl_opts(
     """Construct common yt-dlp options with JS runtimes and cookie handling."""
     opts: Dict[str, Any] = {
         "remote_components": {"ejs:github": True},
+        "format_sort": ["res", "ext:mp4:m4a", "vcodec:h264", "vcodec:vp9", "acodec:m4a", "acodec:aac"],
+        "retries": 5,
+        "fragment_retries": 5,
+        "http_chunk_size": 10485760,
     }
 
-    # Discover and configure supported JS runtimes (Node.js or Deno)
+    # Discover and configure supported JS runtimes (Node.js, Deno, Bun)
     if shutil.which("node"):
         opts["js_runtimes"] = {"node": {}}
     elif shutil.which("deno"):
         opts["js_runtimes"] = {"deno": {}}
+    elif shutil.which("bun"):
+        opts["js_runtimes"] = {"bun": {}}
 
     # Configure ffmpeg location if detected
     ffmpeg_loc = _find_ffmpeg_location()
@@ -200,7 +301,7 @@ class DownloadEngine:
         )
         if is_youtube_url(url):
             ydl_opts.setdefault("extractor_args", {})["youtube"] = {
-                "player_client": ["android", "web", "mweb", "ios"],
+                "player_client": ["android_vr", "web"],
             }
         ydl_opts.update({
             "quiet": True,
@@ -237,7 +338,7 @@ class DownloadEngine:
                     return info
         except Exception as e:
             err_str = str(e).lower()
-            if any(k in err_str for k in ["login required", "bot", "confirm you're not a bot", "private video", "sign in", "401"]):
+            if any(k in err_str for k in ["login required", "bot", "confirm you're not a bot", "private video", "sign in", "401", "403", "forbidden"]):
                 # Try auto-detecting browser cookies if not already specified
                 if not browser or browser == "auto":
                     best_b = get_best_browser()
@@ -532,7 +633,7 @@ class DownloadEngine:
         )
         if is_youtube_url(url) or (info and is_youtube_url(info.get("webpage_url", ""))):
             ydl_opts.setdefault("extractor_args", {})["youtube"] = {
-                "player_client": ["android", "web", "mweb", "ios"],
+                "player_client": ["android_vr", "web"],
             }
         ydl_opts.update({
             "outtmpl": out_template,
@@ -567,13 +668,13 @@ class DownloadEngine:
         else:
             # Video quality logic
             quality_map = {
-                "4k": "bestvideo[height<=2160]+bestaudio/best[height<=2160]/best",
-                "2160p": "bestvideo[height<=2160]+bestaudio/best[height<=2160]/best",
-                "1440p": "bestvideo[height<=1440]+bestaudio/best[height<=1440]/best",
-                "1080p": "bestvideo[height<=1080]+bestaudio/best[height<=1080]/best",
-                "720p": "bestvideo[height<=720]+bestaudio/best[height<=720]/best",
-                "480p": "bestvideo[height<=480]+bestaudio/best[height<=480]/best",
-                "360p": "bestvideo[height<=360]+bestaudio/best[height<=360]/best",
+                "4k": "bestvideo[height<=2160]+bestaudio/bestvideo[width<=2160]+bestaudio/best[height<=2160]/best[width<=2160]/best",
+                "2160p": "bestvideo[height<=2160]+bestaudio/bestvideo[width<=2160]+bestaudio/best[height<=2160]/best[width<=2160]/best",
+                "1440p": "bestvideo[height<=1440]+bestaudio/bestvideo[width<=1440]+bestaudio/best[height<=1440]/best[width<=1440]/best",
+                "1080p": "bestvideo[height<=1080]+bestaudio/bestvideo[width<=1080]+bestaudio/best[height<=1080]/best[width<=1080]/best",
+                "720p": "bestvideo[height<=720]+bestaudio/bestvideo[width<=720]+bestaudio/best[height<=720]/best[width<=720]/best",
+                "480p": "bestvideo[height<=480]+bestaudio/bestvideo[width<=480]+bestaudio/best[height<=480]/best[width<=480]/best",
+                "360p": "bestvideo[height<=360]+bestaudio/bestvideo[width<=360]+bestaudio/best[height<=360]/best[width<=360]/best",
                 "worst": "worstvideo+worstaudio/worst",
                 "best": "bestvideo+bestaudio/best",
             }
@@ -723,27 +824,33 @@ class DownloadEngine:
                     return common_dir if common_dir and os.path.isdir(common_dir) else last_file_downloaded
                 return downloaded_files[0]
 
+            final_file = None
             if last_file_downloaded and os.path.exists(last_file_downloaded):
-                return last_file_downloaded
-            if downloaded_files:
+                final_file = last_file_downloaded
+            elif downloaded_files:
                 for f in reversed(downloaded_files):
                     if os.path.exists(f):
-                        return f
+                        final_file = f
+                        break
 
             # Fallback: check for newest non-temporary file in dest_dir
-            try:
-                candidates = [p for p in dest_dir.iterdir() if p.is_file() and not p.name.endswith(".part") and not p.name.endswith(".ytdl")]
-                if candidates:
-                    newest = max(candidates, key=lambda p: p.stat().st_mtime)
-                    return str(newest)
-            except Exception:
-                pass
+            if not final_file:
+                try:
+                    candidates = [p for p in dest_dir.iterdir() if p.is_file() and not p.name.endswith(".part") and not p.name.endswith(".ytdl")]
+                    if candidates:
+                        newest = max(candidates, key=lambda p: p.stat().st_mtime)
+                        final_file = str(newest)
+                except Exception:
+                    pass
 
-            return last_file_downloaded
+            if final_file and not audio_only and str(final_file).lower().endswith(".mp4"):
+                final_file = _ensure_mp4_compatibility(str(final_file))
+
+            return final_file or last_file_downloaded
 
         except Exception as e:
             err_str = str(e).lower()
-            if any(k in err_str for k in ["login required", "bot", "confirm you're not a bot", "private video", "sign in", "401"]):
+            if any(k in err_str for k in ["login required", "bot", "confirm you're not a bot", "private video", "sign in", "401", "403", "forbidden"]):
                 # Try auto-detecting browser cookies if not explicitly configured
                 if not browser or browser == "auto":
                     best_b = get_best_browser()
