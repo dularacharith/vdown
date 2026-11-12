@@ -140,12 +140,18 @@ def detect_available_browsers(force_refresh: bool = False) -> List[Dict[str, Any
                 browser_info["available"] = count > 0
                 browser_info["cookies_count"] = count
                 if count > 0:
-                    # Check if relevant video domains have cookies
-                    auth_domains = ["youtube", "google", "facebook", "instagram", "tiktok", "twitter", "x.com"]
-                    has_auth = any(
-                        any(domain in (c.domain or "").lower() for domain in auth_domains)
-                        for c in cj
-                    )
+                    # Check if relevant video domains have authenticated session cookies
+                    auth_domains = ["youtube", "facebook", "instagram", "tiktok", "twitter", "x.com"]
+                    has_auth = False
+                    for c in cj:
+                        domain = (c.domain or "").lower()
+                        name = (c.name or "").upper()
+                        if any(d in domain for d in auth_domains):
+                            has_auth = True
+                            break
+                        if "google" in domain and any(k in name for k in ["SID", "SSID", "HSID", "LOGIN_INFO", "AUTH"]):
+                            has_auth = True
+                            break
                     browser_info["has_auth"] = has_auth
         except Exception as e:
             err_msg = str(e)
@@ -158,19 +164,15 @@ def detect_available_browsers(force_refresh: bool = False) -> List[Dict[str, Any
 
 
 def get_best_browser(force_refresh: bool = False) -> Optional[str]:
-    """Return the name of the best available browser with cookies (prioritizing Firefox)."""
+    """Return the name of the best available browser with authenticated session cookies."""
     browsers = detect_available_browsers(force_refresh=force_refresh)
     
-    # 1. First preference: Browsers with authentication cookies for social/media domains
+    # 1. First preference: Browsers with authenticated session cookies for media domains
     for b in browsers:
         if b.get("available") and b.get("has_auth"):
             return b["browser"]
 
-    # 2. Second preference: Any browser with cookies available
-    for b in browsers:
-        if b.get("available") and b.get("cookies_count", 0) > 0:
-            return b["browser"]
-
+    # Do not auto-select browsers that only have anonymous/unrelated tracking cookies
     return None
 
 

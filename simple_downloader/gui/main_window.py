@@ -189,15 +189,15 @@ class MainWindow(QMainWindow):
 
     def _refresh_cookie_badge(self):
         browsers = detect_available_browsers(force_refresh=True)
-        available = [b for b in browsers if b.get("available")]
-        firefox = next((b for b in available if b["browser"] == "firefox"), None)
+        authenticated = [b for b in browsers if b.get("available") and b.get("has_auth")]
+        firefox = next((b for b in authenticated if b["browser"] == "firefox"), None)
 
         if firefox:
             count = firefox["cookies_count"]
             self.cookie_status_label.setText(f"🦊 Firefox Cookies Active ({count})")
             self.cookie_status_label.setObjectName("SuccessBadge")
-        elif available:
-            b = available[0]
+        elif authenticated:
+            b = authenticated[0]
             self.cookie_status_label.setText(f"🌐 {b['name']} Cookies Active ({b['cookies_count']})")
             self.cookie_status_label.setObjectName("SuccessBadge")
         else:
@@ -213,7 +213,12 @@ class MainWindow(QMainWindow):
             self.combo_browser.clear()
             self.combo_browser.addItem("Auto-Detect Browser Cookies (Recommended)", "auto")
             for b in browsers:
-                status = f" ({b['cookies_count']} cookies)" if b.get("available") else " (Not found)"
+                if b.get("available") and b.get("has_auth"):
+                    status = f" ({b['cookies_count']} cookies)"
+                elif b.get("available"):
+                    status = f" ({b['cookies_count']} cookies, no login)"
+                else:
+                    status = " (Not found)"
                 self.combo_browser.addItem(f"{b['name']}{status}", b["browser"])
             self.combo_browser.addItem("None (No session cookies)", "none")
 

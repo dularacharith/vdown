@@ -219,6 +219,67 @@ class TestYouTubeShorts(unittest.TestCase):
         win._paste_clipboard()
         self.assertEqual(win.url_input.text(), test_url)
 
+    def test_youtube_audio_client_and_format_selection(self):
+        engine = DownloadEngine()
+        with patch("yt_dlp.YoutubeDL") as mock_ydl_cls:
+            mock_ydl_instance = MagicMock()
+            mock_ydl_instance.download.return_value = 0
+            mock_ydl_cls.return_value.__enter__.return_value = mock_ydl_instance
+
+            # 1. YouTube audio download
+            engine.download(
+                url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                audio_only=True,
+                audio_format="mp3",
+                audio_quality="320",
+                show_progress=False,
+            )
+            call_opts = mock_ydl_cls.call_args[0][0]
+            self.assertEqual(
+                call_opts.get("extractor_args", {}).get("youtube", {}).get("player_client"),
+                ["android", "web"],
+            )
+            self.assertEqual(call_opts.get("format"), "bestaudio/18/best")
+
+            # 2. YouTube video download
+            engine.download(
+                url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                audio_only=False,
+                quality="1080p",
+                show_progress=False,
+            )
+            call_opts_video = mock_ydl_cls.call_args[0][0]
+            self.assertEqual(
+                call_opts_video.get("extractor_args", {}).get("youtube", {}).get("player_client"),
+                ["android_vr", "web"],
+            )
+
+    def test_youtube_403_automatic_fallback(self):
+        engine = DownloadEngine()
+        call_count = 0
+
+        def mock_download_side_effect(urls):
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                import yt_dlp.utils
+                raise yt_dlp.utils.DownloadError("ERROR: unable to download video data: HTTP Error 403: Forbidden")
+            return 0
+
+        with patch("yt_dlp.YoutubeDL") as mock_ydl_cls:
+            mock_ydl_instance = MagicMock()
+            mock_ydl_instance.download.side_effect = mock_download_side_effect
+            mock_ydl_cls.return_value.__enter__.return_value = mock_ydl_instance
+
+            res = engine.download(
+                url="https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+                audio_only=True,
+                audio_format="mp3",
+                show_progress=False,
+            )
+            # The download should have succeeded via the 403 fallback retry
+            self.assertEqual(call_count, 2)
+
 
 if __name__ == "__main__":
     unittest.main()

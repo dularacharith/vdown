@@ -632,9 +632,17 @@ class DownloadEngine:
             referer=referer,
         )
         if is_youtube_url(url) or (info and is_youtube_url(info.get("webpage_url", ""))):
-            ydl_opts.setdefault("extractor_args", {})["youtube"] = {
-                "player_client": ["android_vr", "web"],
-            }
+            # For YouTube audio downloads: use android client to select reliable unthrottled
+            # progressive audio streams (format 18/22) and avoid 403 Forbidden from GVS PO-gated DASH formats.
+            # For YouTube video downloads: use android_vr to access high-resolution video streams.
+            if audio_only:
+                ydl_opts.setdefault("extractor_args", {})["youtube"] = {
+                    "player_client": ["android", "web"],
+                }
+            else:
+                ydl_opts.setdefault("extractor_args", {})["youtube"] = {
+                    "player_client": ["android_vr", "web"],
+                }
         ydl_opts.update({
             "outtmpl": out_template,
             "quiet": True,
@@ -653,7 +661,11 @@ class DownloadEngine:
         if format_id:
             ydl_opts["format"] = format_id
         elif audio_only:
-            ydl_opts["format"] = "bestaudio/best"
+            # For YouTube, fallback to format 18 if separate DASH audio streams are unavailable or 403-restricted
+            if is_youtube_url(url) or (info and is_youtube_url(info.get("webpage_url", ""))):
+                ydl_opts["format"] = "bestaudio/18/best"
+            else:
+                ydl_opts["format"] = "bestaudio/best"
             preferred_q = audio_quality.rstrip("kK") if audio_quality else "320"
             pp: Dict[str, Any] = {
                 "key": "FFmpegExtractAudio",
@@ -850,6 +862,43 @@ class DownloadEngine:
 
         except Exception as e:
             err_str = str(e).lower()
+            is_yt = is_youtube_url(url) or (info and is_youtube_url(info.get("webpage_url", "")))
+            is_forbidden = any(k in err_str for k in ["403", "forbidden"])
+
+            # 1. Automatic fallback for YouTube 403 Forbidden errors (restricted DASH streams)
+            if is_yt and is_forbidden and not getattr(self, "_in_youtube_403_fallback", False):
+                self._in_youtube_403_fallback = True
+                try:
+                    self.console.print("\n[bold yellow]⚠ YouTube stream was restricted (HTTP 403 Forbidden). Retrying with progressive fallback stream...[/bold yellow]")
+                    return self.download(
+                        url=url,
+                        output_path=output_path,
+                        output_dir=output_dir,
+                        quality="worst" if not audio_only else quality,
+                        format_id="18" if not audio_only else None,
+                        audio_only=audio_only,
+                        audio_format=audio_format,
+                        audio_quality=audio_quality,
+                        video_format=video_format,
+                        rate_limit=rate_limit,
+                        subtitles=subtitles,
+                        sub_lang=sub_lang,
+                        embed_subs=embed_subs,
+                        embed_thumbnail=embed_thumbnail,
+                        embed_metadata=embed_metadata,
+                        playlist=playlist,
+                        playlist_items=playlist_items,
+                        browser=None if browser == "auto" else browser,
+                        cookie_file=cookie_file,
+                        proxy=proxy,
+                        user_agent=user_agent,
+                        referer=referer,
+                        show_progress=show_progress,
+                        progress_callback=progress_callback,
+                    )
+                finally:
+                    self._in_youtube_403_fallback = False
+
             if any(k in err_str for k in ["login required", "bot", "confirm you're not a bot", "private video", "sign in", "401", "403", "forbidden"]):
                 # Try auto-detecting browser cookies if not explicitly configured
                 if not browser or browser == "auto":
